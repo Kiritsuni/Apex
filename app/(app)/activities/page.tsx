@@ -1,377 +1,414 @@
-'use client';
+'use client'
 
-import { useState, useRef } from 'react';
-import { format, startOfISOWeek, endOfISOWeek } from 'date-fns';
-import { Plus, Trash2, Edit2, GripVertical } from 'lucide-react';
-import { Card } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { Badge } from '@/components/ui/badge';
-import { useActivities } from '@/hooks/useActivities';
-import { useSessions } from '@/hooks/useSessions';
-import { useToast } from '@/components/ui/toast';
-import type { Activity } from '@/types/database';
+import { useState } from 'react'
+import { Loader2, Plus } from 'lucide-react'
+import { useActivities } from '@/hooks/useActivities'
+import { useToast } from '@/components/shared/Toast'
+import { EmptyState } from '@/components/shared/EmptyState'
+import type { Activity } from '@/types/database'
 
-const ICONS = ['BookOpen', 'TrendingUp', 'Dumbbell', 'Activity', 'GraduationCap', 'Code', 'Music', 'Heart', 'Star', 'Zap'];
-const CATEGORIES = ['study', 'finance', 'fitness', 'wellness', 'hobby', 'work', 'other'];
-const COLORS = ['#6366f1', '#22c55e', '#f59e0b', '#f97316', '#ec4899', '#06b6d4', '#8b5cf6', '#ef4444', '#14b8a6', '#84cc16'];
+const PRESET_COLORS = [
+  '#6366f1',
+  '#22c55e',
+  '#f59e0b',
+  '#ef4444',
+  '#ec4899',
+  '#f97316',
+  '#06b6d4',
+  '#8b5cf6',
+]
 
-function formatDuration(seconds: number): string {
-  const h = Math.floor(seconds / 3600);
-  const m = Math.floor((seconds % 3600) / 60);
-  if (h > 0) return `${h}h ${m}m`;
-  return `${m}m`;
+const CATEGORIES = ['Estudio', 'Finanzas', 'Fitness', 'Otro'] as const
+type Category = (typeof CATEGORIES)[number]
+const CAT_MAP: Record<Category, string> = {
+  Estudio: 'study',
+  Finanzas: 'finance',
+  Fitness: 'fitness',
+  Otro: 'other',
+}
+const CAT_LABEL: Record<string, string> = {
+  study: 'Estudio',
+  finance: 'Finanzas',
+  fitness: 'Fitness',
+  other: 'Otro',
+}
+
+function ActivityForm({
+  form,
+  setForm,
+  onSubmit,
+  submitting,
+  onCancel,
+  isEdit,
+}: {
+  form: {
+    name: string
+    color: string
+    category: string
+    weeklyGoalHours: string
+    weeklyGoalSessions: string
+    dailyMinHours: string
+    isHardDaily: boolean
+  }
+  setForm: React.Dispatch<React.SetStateAction<typeof form>>
+  onSubmit: (e: React.FormEvent) => void
+  submitting: boolean
+  onCancel: () => void
+  isEdit: boolean
+}) {
+  return (
+    <form onSubmit={onSubmit} className="space-y-4">
+      <div className="space-y-1.5">
+        <label className="text-sm text-[#94a3b8]">Nombre</label>
+        <input
+          required
+          type="text"
+          value={form.name}
+          onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+          className="w-full bg-[#0a0a0a] border border-[#1f1f1f] rounded-lg px-3 py-2 text-sm text-[#f1f5f9] focus:outline-none focus:border-[#6366f1]"
+        />
+      </div>
+
+      <div className="space-y-1.5">
+        <label className="text-sm text-[#94a3b8]">Color</label>
+        <div className="flex gap-2 flex-wrap">
+          {PRESET_COLORS.map((c) => (
+            <button
+              key={c}
+              type="button"
+              onClick={() => setForm((f) => ({ ...f, color: c }))}
+              className="w-8 h-8 rounded-full cursor-pointer transition-transform hover:scale-110"
+              style={{
+                backgroundColor: c,
+                outline: form.color === c ? `2px solid white` : 'none',
+                outlineOffset: '2px',
+              }}
+            />
+          ))}
+        </div>
+      </div>
+
+      <div className="space-y-1.5">
+        <label className="text-sm text-[#94a3b8]">Categoría</label>
+        <select
+          value={
+            Object.entries(CAT_MAP).find(([, v]) => v === form.category)?.[0] ??
+            'Otro'
+          }
+          onChange={(e) =>
+            setForm((f) => ({
+              ...f,
+              category: CAT_MAP[e.target.value as Category] ?? 'other',
+            }))
+          }
+          className="w-full bg-[#0a0a0a] border border-[#1f1f1f] rounded-lg px-3 py-2 text-sm text-[#f1f5f9] focus:outline-none focus:border-[#6366f1]"
+        >
+          {CATEGORIES.map((c) => (
+            <option key={c} value={c}>
+              {c}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      <div className="grid grid-cols-2 gap-3">
+        <div className="space-y-1.5">
+          <label className="text-sm text-[#94a3b8]">
+            Objetivo semanal (horas)
+          </label>
+          <input
+            type="number"
+            min="0"
+            step="0.5"
+            value={form.weeklyGoalHours}
+            onChange={(e) =>
+              setForm((f) => ({ ...f, weeklyGoalHours: e.target.value }))
+            }
+            className="w-full bg-[#0a0a0a] border border-[#1f1f1f] rounded-lg px-3 py-2 text-sm text-[#f1f5f9] focus:outline-none focus:border-[#6366f1]"
+          />
+        </div>
+        <div className="space-y-1.5">
+          <label className="text-sm text-[#94a3b8]">
+            Objetivo semanal (sesiones)
+          </label>
+          <input
+            type="number"
+            min="0"
+            step="1"
+            value={form.weeklyGoalSessions}
+            onChange={(e) =>
+              setForm((f) => ({ ...f, weeklyGoalSessions: e.target.value }))
+            }
+            className="w-full bg-[#0a0a0a] border border-[#1f1f1f] rounded-lg px-3 py-2 text-sm text-[#f1f5f9] focus:outline-none focus:border-[#6366f1]"
+          />
+        </div>
+      </div>
+
+      <div className="space-y-1.5">
+        <label className="text-sm text-[#94a3b8]">Mínimo diario (horas)</label>
+        <input
+          type="number"
+          min="0"
+          step="0.5"
+          value={form.dailyMinHours}
+          onChange={(e) =>
+            setForm((f) => ({ ...f, dailyMinHours: e.target.value }))
+          }
+          className="w-full bg-[#0a0a0a] border border-[#1f1f1f] rounded-lg px-3 py-2 text-sm text-[#f1f5f9] focus:outline-none focus:border-[#6366f1]"
+        />
+      </div>
+
+      <label className="flex items-center gap-3 cursor-pointer">
+        <div
+          onClick={() => setForm((f) => ({ ...f, isHardDaily: !f.isHardDaily }))}
+          className={`relative w-11 h-6 rounded-full transition-colors ${
+            form.isHardDaily ? 'bg-[#6366f1]' : 'bg-[#1f1f1f]'
+          }`}
+        >
+          <span
+            className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white transition-transform ${
+              form.isHardDaily ? 'translate-x-5' : 'translate-x-0'
+            }`}
+          />
+        </div>
+        <span className="text-sm text-[#94a3b8]">
+          Restricción diaria obligatoria
+        </span>
+      </label>
+
+      <div className="flex gap-3">
+        <button
+          type="submit"
+          disabled={submitting}
+          className="flex-1 bg-[#6366f1] hover:bg-[#5558e3] text-white font-medium rounded-lg py-2.5 text-sm transition-colors flex items-center justify-center gap-2 disabled:opacity-60"
+        >
+          {submitting && <Loader2 size={14} className="animate-spin" />}
+          {isEdit ? 'Guardar cambios' : 'Guardar actividad'}
+        </button>
+        <button
+          type="button"
+          onClick={onCancel}
+          className="flex-1 bg-[#1a1a1a] hover:bg-[#222] text-[#94a3b8] font-medium rounded-lg py-2.5 text-sm transition-colors"
+        >
+          Cancelar
+        </button>
+      </div>
+    </form>
+  )
+}
+
+const EMPTY_FORM = {
+  name: '',
+  color: PRESET_COLORS[0],
+  category: 'study',
+  weeklyGoalHours: '',
+  weeklyGoalSessions: '',
+  dailyMinHours: '',
+  isHardDaily: false,
 }
 
 export default function ActivitiesPage() {
-  const { activities, loading, createActivity, updateActivity, deleteActivity } = useActivities();
-  const weekStart = format(startOfISOWeek(new Date()), 'yyyy-MM-dd');
-  const weekEnd = format(endOfISOWeek(new Date()), 'yyyy-MM-dd');
-  const { sessions } = useSessions({ from: weekStart, to: weekEnd });
-  const { toast } = useToast();
+  const { activities, loading, createActivity, updateActivity, deleteActivity } =
+    useActivities()
+  const { toast } = useToast()
 
-  const [open, setOpen] = useState(false);
-  const [editActivity, setEditActivity] = useState<Activity | null>(null);
-  const [submitting, setSubmitting] = useState(false);
-  const [form, setForm] = useState({
-    name: '',
-    color: COLORS[0],
-    icon: ICONS[0],
-    category: 'study',
-    weekly_goal_hours: '',
-    daily_min_hours: '',
-    is_hard_daily_constraint: false,
-    weekly_goal_sessions: '',
-    session_duration_hours: '',
-    market_aware: false,
-  });
+  const [addOpen, setAddOpen] = useState(false)
+  const [addForm, setAddForm] = useState(EMPTY_FORM)
+  const [addSubmitting, setAddSubmitting] = useState(false)
 
-  // Drag-and-drop state
-  const dragId = useRef<string | null>(null);
-  const [dragOverId, setDragOverId] = useState<string | null>(null);
-  const [reordering, setReordering] = useState(false);
+  const [editId, setEditId] = useState<string | null>(null)
+  const [editForm, setEditForm] = useState(EMPTY_FORM)
+  const [editSubmitting, setEditSubmitting] = useState(false)
 
-  const resetForm = () => setForm({
-    name: '', color: COLORS[0], icon: ICONS[0], category: 'study',
-    weekly_goal_hours: '', daily_min_hours: '', is_hard_daily_constraint: false,
-    weekly_goal_sessions: '', session_duration_hours: '', market_aware: false,
-  });
+  const handleAdd = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!addForm.name) return
+    setAddSubmitting(true)
+    try {
+      await createActivity({
+        name: addForm.name,
+        color: addForm.color,
+        icon: 'BookOpen',
+        category: addForm.category,
+        weekly_goal_hours: addForm.weeklyGoalHours
+          ? parseFloat(addForm.weeklyGoalHours)
+          : undefined,
+        weekly_goal_sessions: addForm.weeklyGoalSessions
+          ? parseInt(addForm.weeklyGoalSessions)
+          : undefined,
+        daily_min_hours: addForm.dailyMinHours
+          ? parseFloat(addForm.dailyMinHours)
+          : undefined,
+        is_hard_daily_constraint: addForm.isHardDaily,
+        sort_order: activities.length + 1,
+      })
+      toast('Actividad creada.', 'success')
+      setAddOpen(false)
+      setAddForm(EMPTY_FORM)
+    } catch {
+      toast('Error al crear actividad.', 'error')
+    } finally {
+      setAddSubmitting(false)
+    }
+  }
 
-  const openCreate = () => { resetForm(); setEditActivity(null); setOpen(true); };
   const openEdit = (a: Activity) => {
-    setEditActivity(a);
-    setForm({
+    setEditId(a.id)
+    setEditForm({
       name: a.name,
       color: a.color,
-      icon: a.icon,
       category: a.category,
-      weekly_goal_hours: a.weekly_goal_hours ? String(a.weekly_goal_hours) : '',
-      daily_min_hours: a.daily_min_hours ? String(a.daily_min_hours) : '',
-      is_hard_daily_constraint: a.is_hard_daily_constraint ?? false,
-      weekly_goal_sessions: a.weekly_goal_sessions ? String(a.weekly_goal_sessions) : '',
-      session_duration_hours: a.session_duration_hours ? String(a.session_duration_hours) : '',
-      market_aware: a.market_aware ?? false,
-    });
-    setOpen(true);
-  };
+      weeklyGoalHours: a.weekly_goal_hours ? String(a.weekly_goal_hours) : '',
+      weeklyGoalSessions: a.weekly_goal_sessions
+        ? String(a.weekly_goal_sessions)
+        : '',
+      dailyMinHours: a.daily_min_hours ? String(a.daily_min_hours) : '',
+      isHardDaily: a.is_hard_daily_constraint ?? false,
+    })
+  }
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!form.name) return;
-    setSubmitting(true);
+  const handleEdit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!editId) return
+    setEditSubmitting(true)
     try {
-      const body: Partial<Activity> = {
-        name: form.name,
-        color: form.color,
-        icon: form.icon,
-        category: form.category,
-        weekly_goal_hours: form.weekly_goal_hours ? parseFloat(form.weekly_goal_hours) : undefined,
-        daily_min_hours: form.daily_min_hours ? parseFloat(form.daily_min_hours) : undefined,
-        is_hard_daily_constraint: form.is_hard_daily_constraint,
-        weekly_goal_sessions: form.weekly_goal_sessions ? parseInt(form.weekly_goal_sessions) : undefined,
-        session_duration_hours: form.session_duration_hours ? parseFloat(form.session_duration_hours) : undefined,
-        market_aware: form.market_aware,
-        sort_order: editActivity?.sort_order ?? (activities.length + 1),
-      };
-      if (editActivity) {
-        await updateActivity(editActivity.id, body);
-        toast({ title: 'Activity updated', variant: 'success' });
-      } else {
-        await createActivity(body);
-        toast({ title: 'Activity created', variant: 'success' });
-      }
-      setOpen(false);
-      resetForm();
+      await updateActivity(editId, {
+        name: editForm.name,
+        color: editForm.color,
+        category: editForm.category,
+        weekly_goal_hours: editForm.weeklyGoalHours
+          ? parseFloat(editForm.weeklyGoalHours)
+          : undefined,
+        weekly_goal_sessions: editForm.weeklyGoalSessions
+          ? parseInt(editForm.weeklyGoalSessions)
+          : undefined,
+        daily_min_hours: editForm.dailyMinHours
+          ? parseFloat(editForm.dailyMinHours)
+          : undefined,
+        is_hard_daily_constraint: editForm.isHardDaily,
+      })
+      toast('Actividad actualizada.', 'success')
+      setEditId(null)
     } catch {
-      toast({ title: 'Error', variant: 'destructive' });
+      toast('Error al actualizar actividad.', 'error')
     } finally {
-      setSubmitting(false);
+      setEditSubmitting(false)
     }
-  };
+  }
 
   const handleDelete = async (id: string) => {
     try {
-      await deleteActivity(id);
-      toast({ title: 'Activity removed' });
+      await deleteActivity(id)
+      toast('Actividad eliminada.', 'default')
     } catch {
-      toast({ title: 'Error', variant: 'destructive' });
+      toast('Error al eliminar actividad.', 'error')
     }
-  };
+  }
 
-  // DnD handlers
-  const handleDragStart = (e: React.DragEvent, id: string) => {
-    dragId.current = id;
-    e.dataTransfer.effectAllowed = 'move';
-    // Use a transparent image to suppress default drag ghost for cleaner look
-    const ghost = document.createElement('div');
-    ghost.style.opacity = '0';
-    document.body.appendChild(ghost);
-    e.dataTransfer.setDragImage(ghost, 0, 0);
-    setTimeout(() => document.body.removeChild(ghost), 0);
-  };
-
-  const handleDragOver = (e: React.DragEvent, id: string) => {
-    e.preventDefault();
-    e.dataTransfer.dropEffect = 'move';
-    if (id !== dragId.current) setDragOverId(id);
-  };
-
-  const handleDragEnd = () => {
-    dragId.current = null;
-    setDragOverId(null);
-  };
-
-  const handleDrop = async (e: React.DragEvent, targetId: string) => {
-    e.preventDefault();
-    const sourceId = dragId.current;
-    dragId.current = null;
-    setDragOverId(null);
-    if (!sourceId || sourceId === targetId) return;
-
-    const sourceIdx = activities.findIndex((a) => a.id === sourceId);
-    const targetIdx = activities.findIndex((a) => a.id === targetId);
-    if (sourceIdx === -1 || targetIdx === -1) return;
-
-    // Build new order
-    const reordered = [...activities];
-    const [moved] = reordered.splice(sourceIdx, 1);
-    reordered.splice(targetIdx, 0, moved);
-
-    // Assign new sort_orders
-    const updates = reordered.map((a, i) => ({ id: a.id, sort_order: i + 1 }));
-
-    setReordering(true);
-    try {
-      await Promise.all(updates.map(({ id, sort_order }) => updateActivity(id, { sort_order })));
-    } catch {
-      toast({ title: 'Error reordering', variant: 'destructive' });
-    } finally {
-      setReordering(false);
-    }
-  };
-
-  // Weekly stats per activity
-  const weekStats: Record<string, number> = {};
-  for (const s of sessions) {
-    weekStats[s.activity_id] = (weekStats[s.activity_id] ?? 0) + (s.duration_seconds ?? 0);
+  const handleToggleActive = async (a: Activity) => {
+    // No `is_active` column in current schema, skip
+    toast('Función no disponible en esta versión.', 'default')
   }
 
   return (
-    <div className="p-4 md:p-6 max-w-2xl mx-auto space-y-5 animate-fade-in">
+    <div className="max-w-2xl mx-auto px-4 py-6 space-y-4">
       <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-[var(--text-primary)]">Activities</h1>
-          <p className="text-[var(--text-secondary)] text-sm">{activities.length} tracked</p>
-        </div>
-        <Button onClick={openCreate} size="sm" className="gap-2">
-          <Plus className="h-4 w-4" /> Add
-        </Button>
+        <h1 className="text-2xl font-bold text-[#f1f5f9]">Actividades</h1>
+        <button
+          onClick={() => setAddOpen((o) => !o)}
+          className="flex items-center gap-1.5 px-3 py-1.5 bg-[#6366f1] hover:bg-[#5558e3] text-white text-sm font-medium rounded-lg transition-colors"
+        >
+          <Plus size={14} />
+          Nueva actividad
+        </button>
       </div>
 
-      {loading ? (
-        <p className="text-[var(--text-muted)] text-sm">Loading…</p>
-      ) : activities.length === 0 ? (
-        <Card className="p-8 text-center text-[var(--text-muted)]">
-          <p className="text-sm">No activities yet</p>
-          <p className="text-xs mt-1">Add activities to start tracking your time</p>
-        </Card>
-      ) : (
-        <div className="space-y-2">
-          {activities.map((activity) => {
-            const weekSecs = weekStats[activity.id] ?? 0;
-            const goalSecs = (activity.weekly_goal_hours ?? 0) * 3600;
-            const pct = goalSecs > 0 ? Math.min(weekSecs / goalSecs, 1) : null;
-            const isDragTarget = dragOverId === activity.id;
-
-            return (
-              <Card
-                key={activity.id}
-                className={`p-4 transition-all ${isDragTarget ? 'border-[var(--accent)] bg-[var(--accent)]/5' : ''} ${reordering ? 'opacity-60' : ''}`}
-                draggable
-                onDragStart={(e) => handleDragStart(e, activity.id)}
-                onDragOver={(e) => handleDragOver(e, activity.id)}
-                onDragEnd={handleDragEnd}
-                onDrop={(e) => handleDrop(e, activity.id)}
-              >
-                <div className="flex items-center gap-3">
-                  <GripVertical
-                    className="h-4 w-4 text-[var(--text-muted)] shrink-0 cursor-grab active:cursor-grabbing"
-                    onMouseDown={(e) => e.stopPropagation()}
-                  />
-                  <div className="w-3 h-3 rounded-full shrink-0" style={{ backgroundColor: activity.color }} />
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className="text-sm font-semibold text-[var(--text-primary)]">{activity.name}</span>
-                      <Badge variant="secondary" className="text-xs">{activity.category}</Badge>
-                      {activity.market_aware && <Badge variant="secondary" className="text-xs">Market</Badge>}
-                      {activity.is_hard_daily_constraint && <Badge variant="secondary" className="text-xs">Daily</Badge>}
-                    </div>
-                    <div className="flex items-center gap-3 mt-0.5 text-xs text-[var(--text-muted)]">
-                      <span>This week: {formatDuration(weekSecs)}</span>
-                      {activity.weekly_goal_hours && (
-                        <span>/ {activity.weekly_goal_hours}h goal</span>
-                      )}
-                      {pct !== null && (
-                        <span style={{ color: pct >= 1 ? 'var(--success)' : activity.color }}>
-                          {Math.round(pct * 100)}%
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-1 shrink-0">
-                    <button
-                      onClick={() => openEdit(activity)}
-                      className="p-1.5 rounded-[4px] text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--surface-2)] transition-colors"
-                    >
-                      <Edit2 className="h-4 w-4" />
-                    </button>
-                    <button
-                      onClick={() => handleDelete(activity.id)}
-                      className="p-1.5 rounded-[4px] text-[var(--text-muted)] hover:text-[var(--danger)] hover:bg-[var(--danger)]/10 transition-colors"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </button>
-                  </div>
-                </div>
-              </Card>
-            );
-          })}
-          <p className="text-xs text-[var(--text-muted)] text-center pt-1">Drag to reorder</p>
+      {/* ── Add form ── */}
+      {addOpen && (
+        <div className="bg-[#111111] border border-[#1f1f1f] rounded-xl p-5">
+          <ActivityForm
+            form={addForm}
+            setForm={setAddForm}
+            onSubmit={handleAdd}
+            submitting={addSubmitting}
+            onCancel={() => setAddOpen(false)}
+            isEdit={false}
+          />
         </div>
       )}
 
-      <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="sm:max-w-[440px] max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>{editActivity ? 'Edit Activity' : 'New Activity'}</DialogTitle>
-          </DialogHeader>
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div className="space-y-2">
-              <Label>Name *</Label>
-              <Input
-                placeholder="e.g. English C1"
-                value={form.name}
-                onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label>Category</Label>
-              <Select value={form.category} onValueChange={(v) => setForm((f) => ({ ...f, category: v }))}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {CATEGORIES.map((c) => (
-                    <SelectItem key={c} value={c} className="capitalize">{c}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-2">
-              <Label>Color</Label>
-              <div className="flex gap-2 flex-wrap">
-                {COLORS.map((c) => (
-                  <button
-                    key={c} type="button"
-                    onClick={() => setForm((f) => ({ ...f, color: c }))}
-                    className={`w-7 h-7 rounded-full transition-transform ${form.color === c ? 'ring-2 ring-offset-2 ring-offset-[var(--surface)] scale-110' : ''}`}
-                    style={{ backgroundColor: c }}
+      {/* ── Activity list ── */}
+      {loading ? (
+        <p className="text-sm text-[#94a3b8]">Cargando...</p>
+      ) : activities.length === 0 ? (
+        <EmptyState
+          icon="⚡"
+          title="Sin actividades"
+          description="Añade tu primera actividad para empezar a hacer seguimiento"
+        />
+      ) : (
+        <div className="space-y-2">
+          {activities.map((a) => (
+            <div key={a.id}>
+              <div className="bg-[#111111] border border-[#1f1f1f] rounded-xl p-4">
+                <div className="flex items-center gap-3">
+                  <div
+                    className="w-4 h-4 rounded flex-shrink-0"
+                    style={{ backgroundColor: a.color }}
                   />
-                ))}
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-medium text-[#f1f5f9] text-sm">
+                        {a.name}
+                      </span>
+                      <span className="text-xs px-2 py-0.5 rounded bg-[#1a1a1a] text-[#94a3b8]">
+                        {CAT_LABEL[a.category] ?? a.category}
+                      </span>
+                    </div>
+                    <p className="text-xs text-[#475569] mt-0.5">
+                      {a.weekly_goal_hours
+                        ? `${a.weekly_goal_hours}h/semana`
+                        : a.weekly_goal_sessions
+                        ? `${a.weekly_goal_sessions} sesiones/semana`
+                        : 'Sin objetivo semanal'}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-1 flex-shrink-0">
+                    <button
+                      onClick={() =>
+                        editId === a.id ? setEditId(null) : openEdit(a)
+                      }
+                      className="px-3 py-1.5 text-[#94a3b8] text-xs rounded-lg hover:bg-[#1a1a1a] transition-colors"
+                    >
+                      Editar
+                    </button>
+                    <button
+                      onClick={() => handleDelete(a.id)}
+                      className="px-3 py-1.5 text-[#ef4444]/70 text-xs rounded-lg hover:bg-[#ef4444]/10 transition-colors"
+                    >
+                      Eliminar
+                    </button>
+                  </div>
+                </div>
               </div>
+
+              {/* Inline edit form */}
+              {editId === a.id && (
+                <div className="bg-[#111111] border border-[#6366f1]/30 rounded-xl p-5 mt-1">
+                  <ActivityForm
+                    form={editForm}
+                    setForm={setEditForm}
+                    onSubmit={handleEdit}
+                    submitting={editSubmitting}
+                    onCancel={() => setEditId(null)}
+                    isEdit={true}
+                  />
+                </div>
+              )}
             </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-2">
-                <Label>Weekly Goal (hours)</Label>
-                <Input
-                  type="number" min="0" step="0.5"
-                  placeholder="e.g. 10"
-                  value={form.weekly_goal_hours}
-                  onChange={(e) => setForm((f) => ({ ...f, weekly_goal_hours: e.target.value }))}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>Daily Min (hours)</Label>
-                <Input
-                  type="number" min="0" step="0.5"
-                  placeholder="e.g. 1"
-                  value={form.daily_min_hours}
-                  onChange={(e) => setForm((f) => ({ ...f, daily_min_hours: e.target.value }))}
-                />
-              </div>
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-2">
-                <Label>Weekly Sessions</Label>
-                <Input
-                  type="number" min="0"
-                  placeholder="e.g. 4"
-                  value={form.weekly_goal_sessions}
-                  onChange={(e) => setForm((f) => ({ ...f, weekly_goal_sessions: e.target.value }))}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>Session Length (h)</Label>
-                <Input
-                  type="number" min="0" step="0.5"
-                  placeholder="e.g. 1.5"
-                  value={form.session_duration_hours}
-                  onChange={(e) => setForm((f) => ({ ...f, session_duration_hours: e.target.value }))}
-                />
-              </div>
-            </div>
-            <div className="flex items-center gap-6">
-              <label className="flex items-center gap-2 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={form.is_hard_daily_constraint}
-                  onChange={(e) => setForm((f) => ({ ...f, is_hard_daily_constraint: e.target.checked }))}
-                  className="w-4 h-4 rounded"
-                />
-                <span className="text-sm text-[var(--text-secondary)]">Required daily</span>
-              </label>
-              <label className="flex items-center gap-2 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={form.market_aware}
-                  onChange={(e) => setForm((f) => ({ ...f, market_aware: e.target.checked }))}
-                  className="w-4 h-4 rounded"
-                />
-                <span className="text-sm text-[var(--text-secondary)]">Market hours only</span>
-              </label>
-            </div>
-            <div className="flex gap-3 pt-2">
-              <Button type="button" variant="secondary" onClick={() => setOpen(false)} className="flex-1">Cancel</Button>
-              <Button type="submit" disabled={submitting || !form.name} className="flex-1">
-                {submitting ? 'Saving…' : editActivity ? 'Save' : 'Create'}
-              </Button>
-            </div>
-          </form>
-        </DialogContent>
-      </Dialog>
+          ))}
+        </div>
+      )}
     </div>
-  );
+  )
 }

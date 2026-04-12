@@ -1,364 +1,496 @@
-'use client';
+'use client'
 
-import { useState, useRef, useCallback } from 'react';
-import { format, startOfISOWeek, endOfISOWeek, subWeeks } from 'date-fns';
-import { Sparkles, ChevronLeft, ChevronRight, Download } from 'lucide-react';
-import { Card } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { Skeleton } from '@/components/ui/skeleton';
-import { useSessions } from '@/hooks/useSessions';
-import { useActivities } from '@/hooks/useActivities';
+import { useState, useCallback } from 'react'
+import {
+  format,
+  startOfISOWeek,
+  endOfISOWeek,
+  subWeeks,
+  addDays,
+  parseISO,
+} from 'date-fns'
+import { ChevronLeft, ChevronRight, Loader2 } from 'lucide-react'
+import { useSessions } from '@/hooks/useSessions'
+import { useActivities } from '@/hooks/useActivities'
+import { useToast } from '@/components/shared/Toast'
+import { ProgressBar } from '@/components/shared/ProgressBar'
+import { ActivityBadge } from '@/components/shared/ActivityBadge'
+import { EmptyState } from '@/components/shared/EmptyState'
 
-function formatDuration(seconds: number): string {
-  const h = Math.floor(seconds / 3600);
-  const m = Math.floor((seconds % 3600) / 60);
-  if (h > 0) return `${h}h ${m}m`;
-  return `${m}m`;
+function fmtH(s: number) {
+  const h = Math.floor(s / 3600)
+  const m = Math.floor((s % 3600) / 60)
+  if (h === 0) return `${m}min`
+  if (m === 0) return `${h}h`
+  return `${h}h ${m}min`
 }
 
-/** Render a line that may contain **bold** spans */
 function renderInline(text: string): React.ReactNode {
-  const parts = text.split(/\*\*(.+?)\*\*/g);
-  if (parts.length === 1) return text;
+  const parts = text.split(/\*\*(.+?)\*\*/g)
+  if (parts.length === 1) return text
   return (
     <>
       {parts.map((part, i) =>
-        i % 2 === 1
-          ? <strong key={i} className="font-semibold text-[var(--text-primary)]">{part}</strong>
-          : part,
+        i % 2 === 1 ? (
+          <strong key={i} className="font-semibold text-[#f1f5f9]">
+            {part}
+          </strong>
+        ) : (
+          part
+        )
       )}
     </>
-  );
+  )
 }
 
-/** Minimal markdown → JSX: bold headers, bullets, numbered lists, paragraphs */
 function ReviewText({ text }: { text: string }) {
-  const lines = text.split('\n');
-  const nodes: React.ReactNode[] = [];
+  const lines = text.split('\n')
+  const nodes: React.ReactNode[] = []
 
   for (let i = 0; i < lines.length; i++) {
-    const raw = lines[i];
-    const trimmed = raw.trim();
-
+    const raw = lines[i]
+    const trimmed = raw.trim()
     if (trimmed === '') {
-      nodes.push(<div key={i} className="h-1.5" />);
-      continue;
+      nodes.push(<div key={i} className="h-1.5" />)
+      continue
     }
-
-    // **Header** — whole line is bold
-    const headerMatch = trimmed.match(/^\*\*(.+?)\*\*[:\s]*$/);
+    const headerMatch = trimmed.match(/^\*\*(.+?)\*\*[:\s]*$/)
     if (headerMatch) {
       nodes.push(
-        <p key={i} className="text-[13px] font-semibold uppercase tracking-wide text-[var(--text-muted)] mt-4 first:mt-0">
+        <p
+          key={i}
+          className="text-[13px] font-semibold uppercase tracking-wide text-[#94a3b8] mt-4 first:mt-0"
+        >
           {headerMatch[1]}
-        </p>,
-      );
-      continue;
+        </p>
+      )
+      continue
     }
-
-    // - bullet
+    const actionMatch = trimmed.match(/^(ACCIÓN\s*\d+:)\s*(.+)/i)
+    if (actionMatch) {
+      nodes.push(
+        <div key={i} className="flex items-start gap-2 mt-1">
+          <div className="w-4 h-4 rounded border border-[#6366f1] flex-shrink-0 mt-0.5" />
+          <span className="text-sm text-[#f1f5f9] leading-relaxed">
+            <span className="font-semibold text-[#6366f1]">{actionMatch[1]}</span>{' '}
+            {renderInline(actionMatch[2])}
+          </span>
+        </div>
+      )
+      continue
+    }
     if (/^[-•]\s/.test(trimmed)) {
-      const content = trimmed.replace(/^[-•]\s+/, '');
+      const content = trimmed.replace(/^[-•]\s+/, '')
       nodes.push(
         <div key={i} className="flex items-start gap-2">
-          <span className="mt-[7px] w-1.5 h-1.5 rounded-full bg-[var(--accent)] shrink-0" />
-          <span className="text-sm text-[var(--text-secondary)] leading-relaxed">{renderInline(content)}</span>
-        </div>,
-      );
-      continue;
+          <span className="mt-[7px] w-1.5 h-1.5 rounded-full bg-[#6366f1] flex-shrink-0" />
+          <span className="text-sm text-[#94a3b8] leading-relaxed">
+            {renderInline(content)}
+          </span>
+        </div>
+      )
+      continue
     }
-
-    // 1. numbered
-    const numMatch = trimmed.match(/^(\d+)\.\s+(.+)/);
+    const numMatch = trimmed.match(/^(\d+)\.\s+(.+)/)
     if (numMatch) {
       nodes.push(
         <div key={i} className="flex items-start gap-2">
-          <span className="text-xs font-bold text-[var(--accent)] shrink-0 w-4 text-right mt-0.5">{numMatch[1]}.</span>
-          <span className="text-sm text-[var(--text-secondary)] leading-relaxed">{renderInline(numMatch[2])}</span>
-        </div>,
-      );
-      continue;
+          <span className="text-xs font-bold text-[#6366f1] flex-shrink-0 w-4 text-right mt-0.5">
+            {numMatch[1]}.
+          </span>
+          <span className="text-sm text-[#94a3b8] leading-relaxed">
+            {renderInline(numMatch[2])}
+          </span>
+        </div>
+      )
+      continue
     }
-
-    // plain paragraph
     nodes.push(
-      <p key={i} className="text-sm text-[var(--text-secondary)] leading-relaxed">
+      <p key={i} className="text-sm text-[#94a3b8] leading-relaxed">
         {renderInline(trimmed)}
-      </p>,
-    );
+      </p>
+    )
   }
+  return <div className="space-y-1">{nodes}</div>
+}
 
-  return <div className="space-y-1">{nodes}</div>;
+function parseScore(text: string): number | null {
+  const match = text.match(/\b(\d+(?:\.\d+)?)\s*\/\s*10\b/)
+  if (match) return Math.min(10, Math.max(0, parseFloat(match[1])))
+  return null
+}
+
+function ScoreCircle({ score }: { score: number }) {
+  const color =
+    score >= 8 ? '#22c55e' : score >= 5 ? '#f59e0b' : '#ef4444'
+  const r = 32
+  const circ = 2 * Math.PI * r
+  const dash = (score / 10) * circ
+  return (
+    <div className="relative w-20 h-20 flex-shrink-0">
+      <svg width="80" height="80" className="block -rotate-90">
+        <circle
+          cx={40}
+          cy={40}
+          r={r}
+          fill="none"
+          stroke="#1f1f1f"
+          strokeWidth={8}
+        />
+        <circle
+          cx={40}
+          cy={40}
+          r={r}
+          fill="none"
+          stroke={color}
+          strokeWidth={8}
+          strokeDasharray={`${dash} ${circ - dash}`}
+          strokeLinecap="round"
+        />
+      </svg>
+      <div className="absolute inset-0 flex flex-col items-center justify-center">
+        <span className="text-xl font-bold text-[#f1f5f9]">{score.toFixed(1)}</span>
+        <span className="text-[10px] text-[#475569]">/10</span>
+      </div>
+    </div>
+  )
 }
 
 export default function ReviewPage() {
-  const [weekOffset, setWeekOffset] = useState(0);
-  const [review, setReview] = useState('');
-  const [generating, setGenerating] = useState(false);
-  const [exporting, setExporting] = useState(false);
-  const exportRef = useRef<HTMLDivElement>(null);
+  const [weekOffset, setWeekOffset] = useState(0)
+  const [review, setReview] = useState('')
+  const [generating, setGenerating] = useState(false)
+  const [generatedAt, setGeneratedAt] = useState<Date | null>(null)
+  const { toast } = useToast()
 
-  const referenceDate = weekOffset > 0 ? subWeeks(new Date(), weekOffset) : new Date();
-  const weekStart = startOfISOWeek(referenceDate);
-  const weekEnd = endOfISOWeek(referenceDate);
-  const weekStartStr = format(weekStart, 'yyyy-MM-dd');
-  const weekEndStr = format(weekEnd, 'yyyy-MM-dd');
-  const isCurrentWeek = weekOffset === 0;
+  const referenceDate =
+    weekOffset > 0 ? subWeeks(new Date(), weekOffset) : new Date()
+  const weekStart = startOfISOWeek(referenceDate)
+  const weekEnd = endOfISOWeek(referenceDate)
+  const weekStartStr = format(weekStart, 'yyyy-MM-dd')
+  const weekEndStr = format(weekEnd, 'yyyy-MM-dd')
+  const isCurrentWeek = weekOffset === 0
 
-  const { sessions, loading: sessionsLoading } = useSessions({ from: weekStartStr, to: weekEndStr });
-  const { activities, loading: activitiesLoading } = useActivities();
-  const isLoading = sessionsLoading || activitiesLoading;
+  const { sessions, loading: sessionsLoading } = useSessions({
+    from: weekStartStr,
+    to: weekEndStr,
+  })
+  const { activities, loading: activitiesLoading } = useActivities()
+  const isLoading = sessionsLoading || activitiesLoading
 
-  const statsByActivity: Record<string, {
-    name: string; color: string; totalSeconds: number; sessions: number; goalHours?: number;
-  }> = {};
+  /* ── aggregate stats ── */
+  const byActivity: Record<
+    string,
+    { name: string; color: string; secs: number; sessions: number; goalHours?: number }
+  > = {}
   for (const s of sessions) {
-    if (!statsByActivity[s.activity_id]) {
-      const a = activities.find((act) => act.id === s.activity_id);
-      statsByActivity[s.activity_id] = {
-        name: s.activity?.name ?? a?.name ?? 'Unknown',
-        color: s.activity?.color ?? a?.color ?? '#888',
-        totalSeconds: 0,
+    const a = activities.find((x) => x.id === s.activity_id)
+    if (!byActivity[s.activity_id]) {
+      byActivity[s.activity_id] = {
+        name: a?.name ?? 'Desconocida',
+        color: a?.color ?? '#888',
+        secs: 0,
         sessions: 0,
         goalHours: a?.weekly_goal_hours,
-      };
+      }
     }
-    statsByActivity[s.activity_id].totalSeconds += s.duration_seconds ?? 0;
-    statsByActivity[s.activity_id].sessions += 1;
+    byActivity[s.activity_id].secs += s.duration_seconds ?? 0
+    byActivity[s.activity_id].sessions += 1
   }
+  const sortedActivity = Object.values(byActivity).sort((a, b) => b.secs - a.secs)
+  const totalSecs = sessions.reduce((a, s) => a + (s.duration_seconds ?? 0), 0)
 
-  const weekTotal = sessions.reduce((acc, s) => acc + (s.duration_seconds ?? 0), 0);
-  const sortedStats = Object.values(statsByActivity).sort((a, b) => b.totalSeconds - a.totalSeconds);
+  /* ── english compliance ── */
+  const englishActivity = activities.find(
+    (a) => a.name.toLowerCase().includes('english') || a.name.toLowerCase().includes('inglés')
+  )
+  const HOUR_IN_S = 3600
+  const englishDays = Array.from({ length: 7 }, (_, i) => {
+    const d = addDays(weekStart, i)
+    const dateStr = format(d, 'yyyy-MM-dd')
+    const isFuture = d > new Date()
+    const daySecs = sessions
+      .filter(
+        (s) =>
+          s.date === dateStr &&
+          s.activity_id === englishActivity?.id
+      )
+      .reduce((a, s) => a + (s.duration_seconds ?? 0), 0)
+    return { dateStr, isFuture, met: !isFuture && daySecs >= HOUR_IN_S }
+  })
+  const englishMetDays = englishDays.filter((d) => d.met).length
+
+  /* ── score ── */
+  const localScore = (() => {
+    const withGoals = sortedActivity.filter((a) => a.goalHours)
+    if (withGoals.length === 0) return null
+    const avg =
+      withGoals.reduce(
+        (acc, a) =>
+          acc + Math.min((a.secs / (a.goalHours! * HOUR_IN_S)) * 10, 10),
+        0
+      ) / withGoals.length
+    return +avg.toFixed(1)
+  })()
+
+  const parsedScore = review ? parseScore(review) : null
+  const score = parsedScore ?? localScore
+
+  /* ── gym sessions ── */
+  const gymActivity = activities.find((a) => a.name.toLowerCase().includes('gym'))
+  const gymSessions = sessions.filter((s) => s.activity_id === gymActivity?.id).length
+
+  /* ── stat cards ── */
+  const statCards = [
+    { label: 'Total horas', value: fmtH(totalSecs) },
+    { label: 'Racha inglés', value: `${englishMetDays}/7 días` },
+    { label: 'Sesiones gym', value: String(gymSessions) },
+    { label: 'Sesiones total', value: String(sessions.length) },
+  ]
 
   const generateReview = useCallback(async () => {
-    setGenerating(true);
-    setReview('');
+    setGenerating(true)
+    setReview('')
     try {
       const res = await fetch('/api/review', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ weekOffset }),
-      });
-      if (!res.ok || !res.body) return;
-
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let text = '';
+      })
+      if (!res.ok || !res.body) {
+        toast('Error al generar review.', 'error')
+        return
+      }
+      const reader = res.body.getReader()
+      const decoder = new TextDecoder()
+      let text = ''
       while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        text += decoder.decode(value, { stream: true });
-        setReview(text);
+        const { done, value } = await reader.read()
+        if (done) break
+        text += decoder.decode(value, { stream: true })
+        setReview(text)
       }
+      setGeneratedAt(new Date())
+    } catch {
+      toast('Error al generar review.', 'error')
     } finally {
-      setGenerating(false);
+      setGenerating(false)
     }
-  }, [weekOffset]);
-
-  const exportPDF = useCallback(async () => {
-    if (!exportRef.current) return;
-    setExporting(true);
-    try {
-      const [html2canvasModule, jsPDFModule] = await Promise.all([
-        import('html2canvas'),
-        import('jspdf'),
-      ]);
-      const html2canvas = html2canvasModule.default;
-      const { jsPDF } = jsPDFModule;
-
-      const canvas = await html2canvas(exportRef.current, {
-        backgroundColor: '#0a0a0a',
-        scale: 2,
-        useCORS: true,
-        logging: false,
-      });
-
-      const imgData = canvas.toDataURL('image/png');
-      const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
-      const pageW = pdf.internal.pageSize.getWidth();
-      const pageH = pdf.internal.pageSize.getHeight();
-      const imgW = pageW - 20;
-      const imgH = (canvas.height * imgW) / canvas.width;
-
-      let y = 10;
-      if (imgH > pageH - 20) {
-        let srcY = 0;
-        const rowH = (pageH - 20) * (canvas.width / imgW);
-        while (srcY < canvas.height) {
-          const pageCanvas = document.createElement('canvas');
-          pageCanvas.width = canvas.width;
-          pageCanvas.height = Math.min(rowH, canvas.height - srcY);
-          const ctx = pageCanvas.getContext('2d')!;
-          ctx.drawImage(canvas, 0, -srcY);
-          const pageImg = pageCanvas.toDataURL('image/png');
-          if (srcY > 0) { pdf.addPage(); y = 10; }
-          pdf.addImage(pageImg, 'PNG', 10, y, imgW, (pageCanvas.height * imgW) / canvas.width);
-          srcY += rowH;
-        }
-      } else {
-        pdf.addImage(imgData, 'PNG', 10, y, imgW, imgH);
-      }
-
-      pdf.save(`APEX_Review_${weekStartStr}_${weekEndStr}.pdf`);
-    } catch (err) {
-      console.error('PDF export error:', err);
-    } finally {
-      setExporting(false);
-    }
-  }, [weekStartStr, weekEndStr]);
+  }, [weekOffset, toast])
 
   return (
-    <div className="p-4 md:p-6 max-w-2xl mx-auto space-y-5 animate-fade-in">
-      {/* Header + week nav */}
+    <div className="max-w-2xl mx-auto px-4 py-6 space-y-5">
+      {/* ── Header + week nav ── */}
       <div className="flex items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-[var(--text-primary)]">Weekly Review</h1>
-          <p className="text-[var(--text-secondary)] text-sm">
-            {format(weekStart, 'd MMM')} – {format(weekEnd, 'd MMM yyyy')}
-            {isCurrentWeek && <span className="ml-2 text-[var(--accent)]">· This week</span>}
-          </p>
-        </div>
+        <h1 className="text-2xl font-bold text-[#f1f5f9]">Review semanal</h1>
         <div className="flex items-center gap-1">
           <button
-            onClick={() => { setWeekOffset((o) => o + 1); setReview(''); }}
-            className="p-2 rounded-[6px] hover:bg-[var(--surface-2)] text-[var(--text-secondary)] transition-colors"
-            aria-label="Previous week"
+            onClick={() => {
+              setWeekOffset((o) => o + 1)
+              setReview('')
+            }}
+            className="p-2 rounded-lg hover:bg-[#1a1a1a] text-[#94a3b8] transition-colors"
           >
-            <ChevronLeft className="h-4 w-4" />
+            <ChevronLeft size={16} />
           </button>
+          <span className="text-sm text-[#94a3b8] whitespace-nowrap">
+            {format(weekStart, 'd MMM')} – {format(weekEnd, 'd MMM')}
+          </span>
           <button
-            onClick={() => { setWeekOffset((o) => Math.max(0, o - 1)); setReview(''); }}
+            onClick={() => {
+              setWeekOffset((o) => Math.max(0, o - 1))
+              setReview('')
+            }}
             disabled={isCurrentWeek}
-            className="p-2 rounded-[6px] hover:bg-[var(--surface-2)] text-[var(--text-secondary)] transition-colors disabled:opacity-40"
-            aria-label="Next week"
+            className="p-2 rounded-lg hover:bg-[#1a1a1a] text-[#94a3b8] transition-colors disabled:opacity-40"
           >
-            <ChevronRight className="h-4 w-4" />
+            <ChevronRight size={16} />
           </button>
         </div>
       </div>
 
-      {/* Exportable section */}
-      <div ref={exportRef} className="space-y-4">
-        {/* Stats card */}
-        <Card className="p-4 space-y-3">
-          {isLoading ? (
-            <div className="space-y-3">
-              <div className="flex items-center justify-between">
-                <Skeleton className="h-4 w-24" />
-                <Skeleton className="h-3 w-16" />
-              </div>
-              {[1, 2, 3].map((n) => (
-                <div key={n} className="space-y-1">
-                  <div className="flex items-center gap-2">
-                    <Skeleton className="w-2 h-2 rounded-full shrink-0" />
-                    <Skeleton className="h-3 flex-1" />
-                    <Skeleton className="h-3 w-10" />
-                  </div>
-                  <Skeleton className="h-1 w-full ml-4" />
+      {/* ── Generate button ── */}
+      {!review && !generating && (
+        <EmptyState
+          icon="📊"
+          title="No hay review para esta semana"
+          description="Genera tu review semanal para ver tu análisis"
+          action={
+            <button
+              onClick={generateReview}
+              className="px-4 py-2.5 bg-[#6366f1] hover:bg-[#5558e3] text-white text-sm font-medium rounded-lg transition-colors"
+            >
+              Generar review
+            </button>
+          }
+        />
+      )}
+
+      {(generating || review || !isLoading) && (
+        <>
+          {/* ── Stats grid ── */}
+          {!isLoading && (
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              {statCards.map((c) => (
+                <div
+                  key={c.label}
+                  className="bg-[#111111] border border-[#1f1f1f] rounded-xl p-4 text-center"
+                >
+                  <p className="text-2xl font-bold text-[#f1f5f9]">{c.value}</p>
+                  <p className="text-xs text-[#94a3b8] mt-1">{c.label}</p>
                 </div>
               ))}
             </div>
-          ) : (
-            <>
-              <div className="flex items-center justify-between">
-                <p className="text-sm font-semibold text-[var(--text-secondary)]">
-                  Total:{' '}
-                  <span className="text-[var(--text-primary)]">{formatDuration(weekTotal)}</span>
-                </p>
-                <p className="text-xs text-[var(--text-muted)]">{sessions.length} sessions</p>
-              </div>
+          )}
 
-              {sortedStats.length === 0 ? (
-                <p className="text-xs text-[var(--text-muted)]">No sessions this week</p>
-              ) : (
-                <div className="space-y-2">
-                  {sortedStats.map((stat) => {
-                    const pct = stat.goalHours
-                      ? Math.min(stat.totalSeconds / (stat.goalHours * 3600), 1)
-                      : null;
-                    return (
-                      <div key={stat.name} className="space-y-1">
-                        <div className="flex items-center gap-2">
-                          <div
-                            className="w-2 h-2 rounded-full shrink-0"
-                            style={{ backgroundColor: stat.color }}
-                          />
-                          <span className="text-xs text-[var(--text-secondary)] flex-1 truncate">
-                            {stat.name}
-                          </span>
-                          <span className="text-xs font-medium text-[var(--text-primary)]">
-                            {formatDuration(stat.totalSeconds)}
-                          </span>
-                          {pct !== null && (
-                            <span
-                              className="text-xs w-10 text-right tabular-nums"
-                              style={{ color: pct >= 1 ? 'var(--success)' : stat.color }}
-                            >
-                              {Math.round(pct * 100)}%
-                            </span>
-                          )}
-                        </div>
+          {/* ── Per activity performance ── */}
+          {!isLoading && sortedActivity.length > 0 && (
+            <div className="bg-[#111111] border border-[#1f1f1f] rounded-xl p-5 space-y-3">
+              <h2 className="text-sm font-semibold text-[#f1f5f9]">
+                Rendimiento por actividad
+              </h2>
+              {sortedActivity.map((a) => {
+                const pct = a.goalHours
+                  ? Math.min(a.secs / (a.goalHours * HOUR_IN_S), 1)
+                  : null
+                const pctColor =
+                  pct === null
+                    ? '#6366f1'
+                    : pct >= 1
+                    ? '#22c55e'
+                    : pct >= 0.5
+                    ? '#6366f1'
+                    : pct >= 0.25
+                    ? '#f59e0b'
+                    : '#ef4444'
+                return (
+                  <div key={a.name} className="space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <ActivityBadge name={a.name} color={a.color} size="sm" />
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-[#94a3b8]">
+                          {fmtH(a.secs)}
+                          {a.goalHours ? ` / ${a.goalHours}h objetivo` : ''}
+                        </span>
                         {pct !== null && (
-                          <div className="w-full h-1 bg-[var(--surface-2)] rounded-full overflow-hidden ml-4">
-                            <div
-                              className="h-full rounded-full transition-all"
-                              style={{
-                                width: `${Math.round(pct * 100)}%`,
-                                backgroundColor: stat.color,
-                              }}
-                            />
-                          </div>
+                          <span
+                            className="text-xs font-medium px-1.5 py-0.5 rounded"
+                            style={{ color: pctColor, backgroundColor: pctColor + '20' }}
+                          >
+                            {Math.round(pct * 100)}%
+                          </span>
                         )}
                       </div>
-                    );
-                  })}
-                </div>
-              )}
-            </>
+                    </div>
+                    {pct !== null && (
+                      <ProgressBar
+                        value={a.secs}
+                        max={a.goalHours! * HOUR_IN_S}
+                        color={pctColor}
+                      />
+                    )}
+                  </div>
+                )
+              })}
+            </div>
           )}
-        </Card>
 
-        {/* AI review */}
-        {(review || generating) && (
-          <Card className="p-4">
-            {generating && !review ? (
-              <div className="space-y-2">
-                <Skeleton className="h-3 w-1/3" />
-                <Skeleton className="h-3 w-full" />
-                <Skeleton className="h-3 w-5/6" />
-                <Skeleton className="h-3 w-2/3" />
+          {/* ── English compliance ── */}
+          {!isLoading && englishActivity && (
+            <div className="bg-[#111111] border border-[#1f1f1f] rounded-xl p-5">
+              <h2 className="text-sm font-semibold text-[#f1f5f9] mb-3">
+                Cumplimiento de inglés
+              </h2>
+              <p className="text-sm text-[#94a3b8] mb-3">
+                {englishMetDays}/7 días cumpliste el mínimo de 1 hora de inglés
+              </p>
+              <div className="flex gap-2">
+                {englishDays.map((d, i) => (
+                  <div key={i} className="flex flex-col items-center gap-1">
+                    <div
+                      className="w-8 h-8 rounded-full"
+                      style={{
+                        backgroundColor: d.isFuture
+                          ? '#1f1f1f'
+                          : d.met
+                          ? '#22c55e'
+                          : '#ef4444',
+                      }}
+                    />
+                    <span className="text-[10px] text-[#475569]">
+                      {['L', 'M', 'X', 'J', 'V', 'S', 'D'][i]}
+                    </span>
+                  </div>
+                ))}
               </div>
-            ) : (
-              <ReviewText text={review} />
-            )}
-          </Card>
-        )}
-      </div>
+            </div>
+          )}
 
-      {/* Actions */}
-      <div className="flex gap-3">
-        <Button
+          {/* ── AI Analysis card ── */}
+          {(review || generating) && (
+            <div className="bg-[#111111] border border-[#1f1f1f] rounded-xl p-6">
+              {generating && !review ? (
+                <div className="flex items-center gap-3 text-sm text-[#94a3b8]">
+                  <Loader2 size={16} className="animate-spin" />
+                  Generando análisis...
+                </div>
+              ) : (
+                <>
+                  {score !== null && (
+                    <div className="flex items-center gap-4 mb-4">
+                      <ScoreCircle score={score} />
+                      <div>
+                        <p className="text-sm font-semibold text-[#f1f5f9]">
+                          Puntuación semanal
+                        </p>
+                        <p className="text-xs text-[#475569]">
+                          {score >= 8
+                            ? 'Semana excelente'
+                            : score >= 5
+                            ? 'Semana correcta'
+                            : 'Semana por mejorar'}
+                        </p>
+                      </div>
+                    </div>
+                  )}
+                  <ReviewText text={review} />
+                  {generatedAt && (
+                    <p className="text-xs text-[#475569] mt-4">
+                      Generado el{' '}
+                      {generatedAt.toLocaleDateString('es-ES', {
+                        day: 'numeric',
+                        month: 'short',
+                        hour: '2-digit',
+                        minute: '2-digit',
+                      })}
+                    </p>
+                  )}
+                </>
+              )}
+            </div>
+          )}
+        </>
+      )}
+
+      {/* ── Generate / regenerate button ── */}
+      {(review || generating || (!isLoading && sessions.length > 0)) && (
+        <button
           onClick={generateReview}
           disabled={generating || isLoading}
-          className="flex-1 gap-2"
+          className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-[#6366f1] hover:bg-[#5558e3] text-white text-sm font-medium rounded-xl transition-colors disabled:opacity-60"
         >
-          <Sparkles className="h-4 w-4" />
-          {generating ? 'Generating…' : review ? 'Regenerate' : 'Generate AI Review'}
-        </Button>
-
-        {(sessions.length > 0 || review) && (
-          <Button
-            variant="secondary"
-            onClick={exportPDF}
-            disabled={exporting}
-            className="gap-2 shrink-0"
-            title="Export as PDF"
-          >
-            <Download className="h-4 w-4" />
-            {exporting ? 'Exporting…' : 'PDF'}
-          </Button>
-        )}
-      </div>
+          {generating ? (
+            <>
+              <Loader2 size={16} className="animate-spin" />
+              Generando...
+            </>
+          ) : review ? (
+            'Regenerar review'
+          ) : (
+            'Generar review'
+          )}
+        </button>
+      )}
     </div>
-  );
+  )
 }
