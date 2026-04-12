@@ -69,7 +69,39 @@ export const DEFAULT_ACTIVITIES = [
   },
 ] as const;
 
+export const ENGLISH_ROTATION = [
+  'Reading',
+  'Listening',
+  'Writing',
+  'Speaking',
+  'Grammar',
+  'Vocabulary',
+  'Mock exam'
+] as const
+
+// Day 1=Mon, 2=Tue... 7=Sun (ISO)
+export function getEnglishSuggestionForDay(isoDay: number): string {
+  return ENGLISH_ROTATION[(isoDay - 1) % ENGLISH_ROTATION.length]
+}
+
+export const MOTIVATIONAL_PHRASES = [
+  "La disciplina es elegir entre lo que quieres ahora y lo que más quieres.",
+  "El éxito no es un accidente, es trabajo duro cada día.",
+  "Pequeños progresos diarios generan grandes resultados.",
+  "La constancia supera al talento cuando el talento no trabaja.",
+  "Hoy es otro día para ser mejor que ayer."
+] as const
+
+export const ABSENCE_TYPES = [
+  { value: 'work_full', label: 'Trabajo jornada completa' },
+  { value: 'work_half', label: 'Trabajo media jornada' },
+  { value: 'social', label: 'Salida social' },
+  { value: 'travel', label: 'Viaje' },
+  { value: 'medical', label: 'Médico' },
+  { value: 'other', label: 'Otro' },
+] as const
+
 export const SUBJECTS = [
   'Anglès', 'Economia', 'Empresa', 'Màrqueting',
-  'Venda', 'Atenció al Client', 'Gestió Administrativa', 'Other'
-];
+  'Venda', 'Atenció al Client', 'Gestió Administrativa', 'Otro'
+] as const
