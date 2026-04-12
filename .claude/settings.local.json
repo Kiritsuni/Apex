@@ -1,0 +1,24 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npx create-next-app@latest . --typescript --tailwind --eslint --app --no-src-dir --import-alias \"@/*\" --yes)",
+      "Bash(wait)",
+      "Bash(npm install:*)",
+      "Bash(npx shadcn@latest init --yes --defaults)",
+      "Bash(npx shadcn@latest init --defaults)",
+      "Bash(npx shadcn@latest add button card dialog input label select textarea toast progress badge tabs sheet popover separator --yes)",
+      "Bash(npx shadcn@latest add button card dialog input label select textarea progress badge tabs sheet popover separator --yes --legacy-peer-deps)",
+      "Bash(npx --legacy-peer-deps shadcn@latest add button card dialog input label select textarea progress badge tabs sheet popover separator --yes)",
+      "Bash(npx shadcn@latest add button card dialog input label select textarea progress badge tabs sheet popover separator --yes)",
+      "Bash(find /home/kiritsuni/apex/apex/node_modules -maxdepth 1 -name '.*' -type d -exec rm -rf {} +)",
+      "Bash(find /home/kiritsuni/apex/apex/node_modules -maxdepth 2 -name '.*' -type d -exec rm -rf {} +)",
+      "Bash(ls /home/kiritsuni/apex/apex/*.*)",
+      "Bash(node -e \"require\\('./node_modules/typescript/lib/typescript'\\)\")",
+      "Bash(npx tsc:*)",
+      "Bash(node:*)",
+      "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); [print\\(k\\) for k in sorted\\(d['dependencies'].keys\\(\\)\\)]\")",
+      "Bash(node_modules/next/dist/docs/01-app/02-guides/upgrading/version-16.md)",
+      "Bash(grep -E \"\\\\.\\(ts|tsx|json\\)$\")"
+    ]
+  }
+}
