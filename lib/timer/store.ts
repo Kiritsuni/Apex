@@ -10,10 +10,11 @@ interface TimerState {
   activityName: string | null;
   activityColor: string | null;
   sessionId: string | null;
+  subLabel: string | null;
   startTime: string | null;
   pausedAt: string | null;
   totalPausedSeconds: number;
-  startTimer: (activityId: string, activityName: string, activityColor: string, sessionId: string) => void;
+  startTimer: (activityId: string, activityName: string, activityColor: string, sessionId: string, subLabel?: string | null) => void;
   pauseTimer: () => void;
   resumeTimer: () => void;
   stopTimer: () => void;
@@ -29,12 +30,13 @@ export const useTimerStore = create<TimerState>()(
       activityName: null,
       activityColor: null,
       sessionId: null,
+      subLabel: null,
       startTime: null,
       pausedAt: null,
       totalPausedSeconds: 0,
-      startTimer: (activityId, activityName, activityColor, sessionId) => set({
+      startTimer: (activityId, activityName, activityColor, sessionId, subLabel) => set({
         isActive: true, isPaused: false, activityId, activityName, activityColor,
-        sessionId, startTime: new Date().toISOString(), pausedAt: null, totalPausedSeconds: 0,
+        sessionId, subLabel: subLabel ?? null, startTime: new Date().toISOString(), pausedAt: null, totalPausedSeconds: 0,
       }),
       pauseTimer: () => set({ isPaused: true, pausedAt: new Date().toISOString() }),
       resumeTimer: () => {
@@ -45,7 +47,7 @@ export const useTimerStore = create<TimerState>()(
       },
       stopTimer: () => set({
         isActive: false, isPaused: false, activityId: null, activityName: null,
-        activityColor: null, sessionId: null, startTime: null, pausedAt: null, totalPausedSeconds: 0,
+        activityColor: null, sessionId: null, subLabel: null, startTime: null, pausedAt: null, totalPausedSeconds: 0,
       }),
       getElapsedSeconds: () => {
         const { startTime, totalPausedSeconds, isPaused, pausedAt } = get();

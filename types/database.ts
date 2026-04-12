@@ -72,3 +72,29 @@ export interface WeeklyStats {
   total_seconds: number;
   session_count: number;
 }
+
+export interface ScheduledBlock {
+  id: string
+  user_id: string
+  activity_id: string
+  scheduled_date: string
+  start_time: string
+  duration_minutes: number
+  notes: string | null
+  is_completed: boolean
+  is_tentative: boolean
+  ai_reasoning: string | null
+  created_at: string
+  activity?: Activity
+}
+
+export interface EventRecord {
+  id: string
+  user_id: string
+  event_date: string
+  reason: string | null
+  start_time: string | null
+  end_time: string | null
+  notes: string | null
+  created_at: string
+}
