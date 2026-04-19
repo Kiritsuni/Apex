@@ -4,16 +4,19 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { format, startOfISOWeek, endOfISOWeek, addDays, subWeeks, addWeeks } from 'date-fns'
 import { es } from 'date-fns/locale'
 import { ChevronLeft, ChevronRight, Sparkles, Plus, X, Check, Trash2 } from 'lucide-react'
-import {
-  DndContext, DragOverlay, useDraggable, useDroppable,
-  type DragEndEvent, type DragStartEvent,
-} from '@dnd-kit/core'
 import { useActivities } from '@/hooks/useActivities'
 import { useToast } from '@/components/shared/Toast'
-import { ProgressBar } from '@/components/shared/ProgressBar'
 import type { Activity, ScheduledBlock } from '@/types/database'
 
-// ─── Types ────────────────────────────────────────────────────────────────────
+// ─── Timeline constants ───────────────────────────────────────────────────────
+
+const HOUR_START = 8   // 08:00
+const HOUR_END = 24    // 00:00 (midnight)
+const HOUR_HEIGHT = 56 // px per hour
+const TIMELINE_HEIGHT = (HOUR_END - HOUR_START) * HOUR_HEIGHT // 896px
+
+const HOURS = Array.from({ length: HOUR_END - HOUR_START + 1 }, (_, i) => HOUR_START + i)
+const DAY_ABBREVS = ['LUN', 'MAR', 'MIÉ', 'JUE', 'VIE', 'SÁB', 'DOM']
 
 interface AIBlock {
   date: string
@@ -24,14 +27,22 @@ interface AIBlock {
   notes: string | null
 }
 
-interface AddModalState {
-  date: string
-  time?: string
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function timeToTopPx(time: string): number {
+  const [h, m] = time.split(':').map(Number)
+  return Math.max(0, ((h * 60 + m - HOUR_START * 60) / 60) * HOUR_HEIGHT)
 }
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
+function durationToHeightPx(minutes: number): number {
+  return Math.max((minutes / 60) * HOUR_HEIGHT, 20)
+}
 
-const DAY_ABBREVS = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom']
+function endTime(startTime: string, durationMinutes: number): string {
+  const [h, m] = startTime.split(':').map(Number)
+  const total = h * 60 + m + durationMinutes
+  return `${String(Math.floor(total / 60) % 24).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`
+}
 
 function fmtMins(mins: number): string {
   const h = Math.floor(mins / 60)
@@ -41,79 +52,7 @@ function fmtMins(mins: number): string {
   return `${m}min`
 }
 
-function endTime(startTime: string, durationMinutes: number): string {
-  const [h, mi] = startTime.split(':').map(Number)
-  const total = h * 60 + mi + durationMinutes
-  return `${String(Math.floor(total / 60) % 24).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`
-}
-
-// ─── Draggable Block ─────────────────────────────────────────────────────────
-
-function DraggableBlock({
-  block,
-  onEdit,
-}: {
-  block: ScheduledBlock
-  onEdit: (block: ScheduledBlock) => void
-}) {
-  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({ id: block.id })
-
-  const style = transform
-    ? { transform: `translate3d(${transform.x}px, ${transform.y}px, 0)`, opacity: 0.5 }
-    : {}
-
-  const st = block.start_time.substring(0, 5)
-  const et = endTime(block.start_time, block.duration_minutes)
-  const color = block.activity?.color ?? '#6366f1'
-
-  return (
-    <div
-      ref={setNodeRef}
-      style={{
-        borderLeftColor: color,
-        backgroundColor: color + '1a',
-        opacity: block.is_completed ? 0.4 : isDragging ? 0.4 : 1,
-        ...style,
-      }}
-      className={`border-l-[3px] rounded-md p-2 mb-1 cursor-pointer hover:opacity-80 transition-opacity select-none ${
-        block.is_tentative ? 'border-dashed' : ''
-      }`}
-      {...listeners}
-      {...attributes}
-      onClick={() => onEdit(block)}
-    >
-      <p className={`text-xs font-semibold text-[#f1f5f9] leading-tight ${block.is_completed ? 'line-through opacity-60' : ''}`}>
-        {block.activity?.name ?? '—'}
-      </p>
-      <p className="text-xs text-[#94a3b8] mt-0.5">{st}–{et}</p>
-    </div>
-  )
-}
-
-// ─── Droppable Day Column ─────────────────────────────────────────────────────
-
-function DroppableDay({
-  dateStr,
-  children,
-}: {
-  dateStr: string
-  children: React.ReactNode
-}) {
-  const { setNodeRef, isOver } = useDroppable({ id: dateStr })
-
-  return (
-    <div
-      ref={setNodeRef}
-      className={`min-h-[400px] flex flex-col pt-2 transition-colors rounded-md ${
-        isOver ? 'ring-1 ring-[#6366f1]/40 bg-[#6366f1]/5' : ''
-      }`}
-    >
-      {children}
-    </div>
-  )
-}
-
-// ─── Add / Edit Block Modal ───────────────────────────────────────────────────
+// ─── Duration presets ─────────────────────────────────────────────────────────
 
 const DURATION_PILLS = [
   { label: '30min', mins: 30 },
@@ -121,6 +60,8 @@ const DURATION_PILLS = [
   { label: '1.5h', mins: 90 },
   { label: '2h', mins: 120 },
 ]
+
+// ─── Block Modal (add / edit) ─────────────────────────────────────────────────
 
 function BlockModal({
   mode,
@@ -135,16 +76,28 @@ function BlockModal({
   initial: { date: string; time?: string; block?: ScheduledBlock }
   activities: Activity[]
   onClose: () => void
-  onSave: (data: { activity_id: string; scheduled_date: string; start_time: string; duration_minutes: number; notes: string }) => Promise<void>
+  onSave: (data: {
+    activity_id: string
+    scheduled_date: string
+    start_time: string
+    duration_minutes: number
+    notes: string
+  }) => Promise<void>
   onDelete?: () => Promise<void>
   onComplete?: () => Promise<void>
 }) {
-  const [activityId, setActivityId] = useState(initial.block?.activity_id ?? activities[0]?.id ?? '')
+  const [activityId, setActivityId] = useState(
+    initial.block?.activity_id ?? activities[0]?.id ?? ''
+  )
   const [date, setDate] = useState(initial.block?.scheduled_date ?? initial.date)
-  const [startTime, setStartTime] = useState(initial.block?.start_time?.substring(0, 5) ?? initial.time ?? '09:00')
+  const [startTime, setStartTime] = useState(
+    initial.block?.start_time?.substring(0, 5) ?? initial.time ?? '09:00'
+  )
   const [selectedMins, setSelectedMins] = useState(initial.block?.duration_minutes ?? 60)
   const [useCustom, setUseCustom] = useState(
-    initial.block ? !DURATION_PILLS.some(p => p.mins === initial.block!.duration_minutes) : false
+    initial.block
+      ? !DURATION_PILLS.some(p => p.mins === initial.block!.duration_minutes)
+      : false
   )
   const [customMins, setCustomMins] = useState(String(initial.block?.duration_minutes ?? ''))
   const [notes, setNotes] = useState(initial.block?.notes ?? '')
@@ -155,84 +108,94 @@ function BlockModal({
 
   async function handleSave() {
     setSaving(true)
-    await onSave({ activity_id: activityId, scheduled_date: date, start_time: startTime, duration_minutes: finalMins, notes })
+    await onSave({
+      activity_id: activityId,
+      scheduled_date: date,
+      start_time: startTime,
+      duration_minutes: finalMins,
+      notes,
+    })
     setSaving(false)
   }
 
-  async function handleDelete() {
-    if (!onDelete) return
-    setDeleting(true)
-    await onDelete()
-    setDeleting(false)
-  }
-
   return (
-    <div className="fixed inset-0 z-50 flex items-end md:items-center md:justify-center">
+    /* Bottom sheet on mobile, right drawer on desktop */
+    <div className="fixed inset-0 z-50 flex items-end lg:items-stretch lg:justify-end">
       <div className="absolute inset-0 bg-black/60" onClick={onClose} />
-      <div className="relative w-full md:max-w-md bg-[#111111] border border-[#1f1f1f] rounded-t-2xl md:rounded-2xl p-6 space-y-5 max-h-[90vh] overflow-y-auto">
+
+      <div className="relative w-full lg:w-[400px] lg:h-full bg-[var(--surface-1)] border border-[var(--border)] rounded-t-2xl lg:rounded-none lg:border-l lg:border-t-0 lg:border-r-0 lg:border-b-0 p-6 space-y-5 max-h-[90vh] lg:max-h-full overflow-y-auto">
 
         <div className="flex items-center justify-between">
-          <h3 className="text-base font-semibold text-[#f1f5f9]">
+          <h3 className="text-[16px] font-[600] text-[var(--text-primary)]" style={{ letterSpacing: '-0.01em' }}>
             {mode === 'add' ? 'Añadir bloque' : 'Editar bloque'}
           </h3>
-          <button onClick={onClose} className="p-1 rounded-lg hover:bg-[#1a1a1a]">
-            <X size={18} className="text-[#94a3b8]" />
+          <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-[var(--surface-2)]">
+            <X size={18} className="text-[var(--text-secondary)]" />
           </button>
         </div>
 
-        {/* Activity */}
+        {/* Activity selector */}
         <div className="space-y-2">
-          <label className="text-xs text-[#94a3b8] font-medium">Actividad</label>
-          <div className="space-y-1.5 max-h-48 overflow-y-auto">
+          <label className="text-[11px] font-[500] text-[var(--text-muted)] uppercase tracking-wider">
+            Actividad
+          </label>
+          <div className="space-y-1.5 max-h-44 overflow-y-auto">
             {activities.map(a => (
               <button
                 key={a.id}
                 onClick={() => setActivityId(a.id)}
-                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl border text-left transition-colors ${
-                  activityId === a.id ? 'border-[#6366f1] bg-[#6366f1]/10' : 'border-[#1f1f1f] hover:border-[#2a2a2a]'
+                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-[10px] border text-left transition-colors ${
+                  activityId === a.id
+                    ? 'border-[var(--accent)] bg-[rgba(99,102,241,0.12)]'
+                    : 'border-[var(--border)] hover:border-[var(--border-strong)]'
                 }`}
               >
-                <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: a.color }} />
-                <span className="text-sm font-medium text-[#f1f5f9]">{a.name}</span>
+                <div
+                  className="w-2.5 h-2.5 rounded-full flex-shrink-0"
+                  style={{ backgroundColor: a.color }}
+                />
+                <span className="text-[14px] font-[500] text-[var(--text-primary)]">{a.name}</span>
               </button>
             ))}
           </div>
         </div>
 
-        {/* Date */}
-        <div className="space-y-2">
-          <label className="text-xs text-[#94a3b8] font-medium">Fecha</label>
-          <input
-            type="date"
-            value={date}
-            onChange={e => setDate(e.target.value)}
-            className="w-full bg-[#1a1a1a] border border-[#1f1f1f] rounded-xl px-3 py-2 text-sm text-[#f1f5f9] focus:outline-none focus:border-[#6366f1]"
-          />
-        </div>
-
-        {/* Start time */}
-        <div className="space-y-2">
-          <label className="text-xs text-[#94a3b8] font-medium">Hora inicio</label>
-          <input
-            type="time"
-            value={startTime}
-            onChange={e => setStartTime(e.target.value)}
-            className="w-full bg-[#1a1a1a] border border-[#1f1f1f] rounded-xl px-3 py-2 text-sm text-[#f1f5f9] focus:outline-none focus:border-[#6366f1]"
-          />
+        {/* Date + start time */}
+        <div className="grid grid-cols-2 gap-3">
+          <div className="space-y-1.5">
+            <label className="text-[11px] font-[500] text-[var(--text-muted)]">Fecha</label>
+            <input
+              type="date"
+              value={date}
+              onChange={e => setDate(e.target.value)}
+              className="w-full bg-[var(--surface-2)] border border-[var(--border)] rounded-[10px] px-3 py-2 text-[13px] text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent)]"
+            />
+          </div>
+          <div className="space-y-1.5">
+            <label className="text-[11px] font-[500] text-[var(--text-muted)]">Hora inicio</label>
+            <input
+              type="time"
+              value={startTime}
+              onChange={e => setStartTime(e.target.value)}
+              className="w-full bg-[var(--surface-2)] border border-[var(--border)] rounded-[10px] px-3 py-2 text-[13px] text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent)]"
+            />
+          </div>
         </div>
 
         {/* Duration */}
         <div className="space-y-2">
-          <label className="text-xs text-[#94a3b8] font-medium">Duración</label>
+          <label className="text-[11px] font-[500] text-[var(--text-muted)] uppercase tracking-wider">
+            Duración
+          </label>
           <div className="flex flex-wrap gap-2">
             {DURATION_PILLS.map(p => (
               <button
                 key={p.mins}
                 onClick={() => { setSelectedMins(p.mins); setUseCustom(false) }}
-                className={`px-3 py-1.5 rounded-lg text-sm font-medium border transition-colors ${
+                className={`px-3 py-1.5 rounded-lg text-[13px] font-[500] border transition-colors ${
                   !useCustom && selectedMins === p.mins
-                    ? 'bg-[#6366f1] border-[#6366f1] text-white'
-                    : 'border-[#1f1f1f] text-[#94a3b8] hover:border-[#6366f1]/50'
+                    ? 'bg-[var(--accent)] border-[var(--accent)] text-white'
+                    : 'border-[var(--border)] text-[var(--text-secondary)] hover:border-[rgba(99,102,241,0.5)]'
                 }`}
               >
                 {p.label}
@@ -240,11 +203,13 @@ function BlockModal({
             ))}
             <button
               onClick={() => setUseCustom(true)}
-              className={`px-3 py-1.5 rounded-lg text-sm font-medium border transition-colors ${
-                useCustom ? 'bg-[#6366f1] border-[#6366f1] text-white' : 'border-[#1f1f1f] text-[#94a3b8] hover:border-[#6366f1]/50'
+              className={`px-3 py-1.5 rounded-lg text-[13px] font-[500] border transition-colors ${
+                useCustom
+                  ? 'bg-[var(--accent)] border-[var(--accent)] text-white'
+                  : 'border-[var(--border)] text-[var(--text-secondary)] hover:border-[rgba(99,102,241,0.5)]'
               }`}
             >
-              Personalizado
+              Custom
             </button>
           </div>
           {useCustom && (
@@ -255,56 +220,58 @@ function BlockModal({
               placeholder="Minutos"
               value={customMins}
               onChange={e => setCustomMins(e.target.value)}
-              className="w-full bg-[#1a1a1a] border border-[#1f1f1f] rounded-xl px-3 py-2 text-sm text-[#f1f5f9] focus:outline-none focus:border-[#6366f1]"
+              className="w-full bg-[var(--surface-2)] border border-[var(--border)] rounded-[10px] px-3 py-2 text-[13px] text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent)]"
             />
           )}
         </div>
 
         {/* Notes */}
-        <div className="space-y-2">
-          <label className="text-xs text-[#94a3b8] font-medium">Notas (opcional)</label>
+        <div className="space-y-1.5">
+          <label className="text-[11px] font-[500] text-[var(--text-muted)]">Notas (opcional)</label>
           <textarea
             value={notes}
             onChange={e => setNotes(e.target.value)}
             rows={2}
-            className="w-full bg-[#1a1a1a] border border-[#1f1f1f] rounded-xl px-3 py-2 text-sm text-[#f1f5f9] focus:outline-none focus:border-[#6366f1] resize-none"
+            className="w-full bg-[var(--surface-2)] border border-[var(--border)] rounded-[10px] px-3 py-2 text-[13px] text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent)] resize-none"
           />
         </div>
 
-        {/* Actions */}
+        {/* Primary actions */}
         <div className="flex gap-3">
           <button
             onClick={onClose}
-            className="flex-1 py-3 border border-[#1f1f1f] rounded-xl text-sm font-medium text-[#94a3b8] hover:bg-[#1a1a1a] transition-colors"
+            className="flex-1 py-3 border border-[var(--border)] rounded-[10px] text-[13px] font-[500] text-[var(--text-secondary)] hover:bg-[var(--surface-2)] transition-colors"
           >
             Cancelar
           </button>
           <button
             onClick={handleSave}
             disabled={saving || !activityId || !date || !startTime}
-            className="flex-1 py-3 bg-[#6366f1] rounded-xl text-sm font-semibold text-white hover:bg-[#5254cc] disabled:opacity-50 transition-colors"
+            className="flex-1 py-3 bg-[var(--accent)] rounded-[10px] text-[13px] font-[600] text-white hover:bg-[var(--accent-hover)] disabled:opacity-50 transition-colors"
           >
             {saving ? 'Guardando…' : mode === 'add' ? 'Guardar bloque' : 'Guardar cambios'}
           </button>
         </div>
 
+        {/* Secondary (edit-only) actions */}
         {mode === 'edit' && (
-          <div className="flex gap-3 pt-1">
+          <div className="flex gap-3">
             {onComplete && (
               <button
                 onClick={onComplete}
-                className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-[#22c55e]/10 border border-[#22c55e]/20 rounded-xl text-sm font-medium text-[#22c55e] hover:bg-[#22c55e]/20 transition-colors"
+                className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-[rgba(16,185,129,0.08)] border border-[rgba(16,185,129,0.2)] rounded-[10px] text-[12px] font-[500] text-[var(--success)] hover:bg-[rgba(16,185,129,0.15)] transition-colors"
               >
-                <Check size={15} /> Marcar completado
+                <Check size={14} /> Completado
               </button>
             )}
             {onDelete && (
               <button
-                onClick={handleDelete}
+                onClick={async () => { setDeleting(true); await onDelete?.(); setDeleting(false) }}
                 disabled={deleting}
-                className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-[#ef4444]/10 border border-[#ef4444]/20 rounded-xl text-sm font-medium text-[#ef4444] hover:bg-[#ef4444]/20 transition-colors"
+                className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-[rgba(239,68,68,0.08)] border border-[rgba(239,68,68,0.2)] rounded-[10px] text-[12px] font-[500] text-[var(--danger)] hover:bg-[rgba(239,68,68,0.15)] transition-colors"
               >
-                <Trash2 size={15} /> {deleting ? 'Eliminando…' : 'Eliminar'}
+                <Trash2 size={14} />
+                {deleting ? 'Eliminando…' : 'Eliminar'}
               </button>
             )}
           </div>
@@ -334,33 +301,40 @@ function DiffModal({
   const [applying, setApplying] = useState(false)
   const futureBlocks = currentBlocks.filter(b => b.scheduled_date >= todayStr)
 
-  async function handleApply() {
-    setApplying(true)
-    await onApply()
-    setApplying(false)
-  }
-
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
       <div className="absolute inset-0 bg-black/70" onClick={onCancel} />
-      <div className="relative w-full max-w-lg bg-[#111111] border border-[#1f1f1f] rounded-2xl p-6 space-y-5 max-h-[80vh] flex flex-col">
+      <div className="relative w-full max-w-lg bg-[var(--surface-1)] border border-[var(--border)] rounded-2xl p-6 space-y-5 max-h-[80vh] flex flex-col">
+
         <div className="flex items-center justify-between flex-shrink-0">
-          <h3 className="text-base font-semibold text-[#f1f5f9]">Propuesta de Claude</h3>
-          <button onClick={onCancel} className="p-1 rounded-lg hover:bg-[#1a1a1a]">
-            <X size={18} className="text-[#94a3b8]" />
+          <h3 className="text-[16px] font-[600] text-[var(--text-primary)]">Propuesta de Claude</h3>
+          <button onClick={onCancel} className="p-1.5 rounded-lg hover:bg-[var(--surface-2)]">
+            <X size={18} className="text-[var(--text-secondary)]" />
           </button>
         </div>
 
-        <div className="flex-1 overflow-y-auto space-y-3">
+        <div className="flex-1 overflow-y-auto space-y-3 min-h-0">
           {futureBlocks.length > 0 && (
             <div>
-              <p className="text-xs font-semibold text-[#ef4444] uppercase mb-2">Se eliminan ({futureBlocks.length})</p>
+              <p className="text-[11px] font-[600] text-[var(--danger)] uppercase tracking-wider mb-2">
+                Se eliminan ({futureBlocks.length})
+              </p>
               <div className="space-y-1">
                 {futureBlocks.map(b => (
-                  <div key={b.id} className="flex items-center gap-2 px-3 py-2 bg-[#ef4444]/10 border border-[#ef4444]/20 rounded-xl">
-                    <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: b.activity?.color ?? '#ef4444' }} />
-                    <span className="text-xs text-[#f1f5f9]">{b.scheduled_date} · {b.activity?.name}</span>
-                    <span className="text-xs text-[#94a3b8] ml-auto">{b.start_time.substring(0, 5)}</span>
+                  <div
+                    key={b.id}
+                    className="flex items-center gap-2 px-3 py-2 bg-[rgba(239,68,68,0.08)] border border-[rgba(239,68,68,0.15)] rounded-[10px]"
+                  >
+                    <div
+                      className="w-2 h-2 rounded-full flex-shrink-0"
+                      style={{ backgroundColor: b.activity?.color ?? '#EF4444' }}
+                    />
+                    <span className="text-[12px] text-[var(--text-primary)]">
+                      {b.scheduled_date} · {b.activity?.name}
+                    </span>
+                    <span className="text-[11px] text-[var(--text-secondary)] ml-auto">
+                      {b.start_time.substring(0, 5)}
+                    </span>
                   </div>
                 ))}
               </div>
@@ -368,15 +342,27 @@ function DiffModal({
           )}
 
           <div>
-            <p className="text-xs font-semibold text-[#22c55e] uppercase mb-2">Se añaden ({newBlocks.length})</p>
+            <p className="text-[11px] font-[600] text-[var(--success)] uppercase tracking-wider mb-2">
+              Se añaden ({newBlocks.length})
+            </p>
             <div className="space-y-1">
               {newBlocks.map((b, i) => {
                 const act = activities.find(a => a.name === b.activity_name)
                 return (
-                  <div key={i} className="flex items-center gap-2 px-3 py-2 bg-[#22c55e]/10 border border-[#22c55e]/20 rounded-xl">
-                    <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: act?.color ?? '#22c55e' }} />
-                    <span className="text-xs text-[#f1f5f9]">{b.date} · {b.activity_name}</span>
-                    <span className="text-xs text-[#94a3b8] ml-auto">{b.start_time} · {b.duration_minutes}min</span>
+                  <div
+                    key={i}
+                    className="flex items-center gap-2 px-3 py-2 bg-[rgba(16,185,129,0.08)] border border-[rgba(16,185,129,0.15)] rounded-[10px]"
+                  >
+                    <div
+                      className="w-2 h-2 rounded-full flex-shrink-0"
+                      style={{ backgroundColor: act?.color ?? '#10B981' }}
+                    />
+                    <span className="text-[12px] text-[var(--text-primary)]">
+                      {b.date} · {b.activity_name}
+                    </span>
+                    <span className="text-[11px] text-[var(--text-secondary)] ml-auto">
+                      {b.start_time} · {fmtMins(b.duration_minutes)}
+                    </span>
                   </div>
                 )
               })}
@@ -387,14 +373,14 @@ function DiffModal({
         <div className="flex gap-3 flex-shrink-0">
           <button
             onClick={onCancel}
-            className="flex-1 py-3 border border-[#1f1f1f] rounded-xl text-sm font-medium text-[#94a3b8] hover:bg-[#1a1a1a] transition-colors"
+            className="flex-1 py-3 border border-[var(--border)] rounded-[10px] text-[13px] font-[500] text-[var(--text-secondary)] hover:bg-[var(--surface-2)] transition-colors"
           >
             Cancelar
           </button>
           <button
-            onClick={handleApply}
+            onClick={async () => { setApplying(true); await onApply(); setApplying(false) }}
             disabled={applying}
-            className="flex-1 py-3 bg-[#6366f1] rounded-xl text-sm font-semibold text-white hover:bg-[#5254cc] disabled:opacity-50 transition-colors"
+            className="flex-1 py-3 bg-[var(--accent)] rounded-[10px] text-[13px] font-[600] text-white hover:bg-[var(--accent-hover)] disabled:opacity-50 transition-colors"
           >
             {applying ? 'Aplicando…' : 'Aplicar cambios'}
           </button>
@@ -404,25 +390,66 @@ function DiffModal({
   )
 }
 
+// ─── Timeline Block ───────────────────────────────────────────────────────────
+
+function TimelineBlock({
+  block,
+  onClick,
+}: {
+  block: ScheduledBlock
+  onClick: () => void
+}) {
+  const color = block.activity?.color ?? '#6366F1'
+  const top = timeToTopPx(block.start_time)
+  const height = durationToHeightPx(block.duration_minutes)
+  const st = block.start_time.substring(0, 5)
+  const et = endTime(block.start_time, block.duration_minutes)
+
+  return (
+    <div
+      className={`absolute left-0.5 right-0.5 rounded-[6px] overflow-hidden cursor-pointer hover:brightness-110 transition-all select-none ${
+        block.is_completed ? 'opacity-40' : ''
+      } ${block.is_tentative ? 'opacity-70' : ''}`}
+      style={{
+        top: top + 'px',
+        height: height + 'px',
+        backgroundColor: color + '1f', // ~12% opacity
+        borderLeft: `2px solid ${color}`,
+      }}
+      onClick={(e) => { e.stopPropagation(); onClick() }}
+    >
+      <div className="px-1.5 pt-0.5">
+        <p
+          className={`text-[12px] font-[500] text-white leading-tight truncate ${
+            block.is_completed ? 'line-through' : ''
+          }`}
+        >
+          {block.activity?.name ?? '—'}
+        </p>
+        {height >= 38 && (
+          <p className="text-[11px] text-[var(--text-secondary)] leading-none mt-0.5">
+            {st}–{et}
+          </p>
+        )}
+      </div>
+    </div>
+  )
+}
+
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export default function WeekPage() {
-  const [view, setView] = useState<'week' | 'day'>('week')
   const [currentWeekStart, setCurrentWeekStart] = useState(() => startOfISOWeek(new Date()))
   const [selectedDay, setSelectedDay] = useState(() => new Date())
   const [blocks, setBlocks] = useState<ScheduledBlock[]>([])
   const [loading, setLoading] = useState(true)
-  const [activeId, setActiveId] = useState<string | null>(null)
-  const [addModal, setAddModal] = useState<AddModalState | null>(null)
+  const [addModal, setAddModal] = useState<{ date: string; time?: string } | null>(null)
   const [editBlock, setEditBlock] = useState<ScheduledBlock | null>(null)
   const [reorganizing, setReorganizing] = useState(false)
   const [diffData, setDiffData] = useState<AIBlock[] | null>(null)
-  const [weekSummaryOpen, setWeekSummaryOpen] = useState(false)
-  const [currentMinute, setCurrentMinute] = useState(() => {
-    const n = new Date(); return n.getHours() * 60 + n.getMinutes()
-  })
+  const [currentTime, setCurrentTime] = useState(() => new Date())
+  const touchStartX = useRef<number | null>(null)
 
-  const timelineRef = useRef<HTMLDivElement>(null)
   const { activities } = useActivities()
   const { toast } = useToast()
 
@@ -430,19 +457,17 @@ export default function WeekPage() {
   const weekEnd = endOfISOWeek(currentWeekStart)
   const weekStartStr = format(weekStart, 'yyyy-MM-dd')
   const weekEndStr = format(weekEnd, 'yyyy-MM-dd')
-  const today = format(new Date(), 'yyyy-MM-dd')
+  const todayStr = format(new Date(), 'yyyy-MM-dd')
   const days = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i))
+  const isCurrentWeek = weekStartStr === format(startOfISOWeek(new Date()), 'yyyy-MM-dd')
 
-  // Current time indicator
+  // Current time tick
   useEffect(() => {
-    const iv = setInterval(() => {
-      const n = new Date()
-      setCurrentMinute(n.getHours() * 60 + n.getMinutes())
-    }, 60000)
+    const iv = setInterval(() => setCurrentTime(new Date()), 60000)
     return () => clearInterval(iv)
   }, [])
 
-  // Fetch blocks
+  // Fetch blocks for the week
   const fetchBlocks = useCallback(async (from: string, to: string) => {
     setLoading(true)
     try {
@@ -457,38 +482,29 @@ export default function WeekPage() {
     fetchBlocks(weekStartStr, weekEndStr)
   }, [weekStartStr, weekEndStr, fetchBlocks])
 
-  // DnD handlers
-  function handleDragStart(event: DragStartEvent) {
-    setActiveId(String(event.active.id))
+  // Navigate weeks
+  function prevWeek() {
+    setCurrentWeekStart(d => subWeeks(d, 1))
+    setSelectedDay(d => addDays(d, -7))
+  }
+  function nextWeek() {
+    setCurrentWeekStart(d => addWeeks(d, 1))
+    setSelectedDay(d => addDays(d, 7))
+  }
+  function goToday() {
+    const now = new Date()
+    setCurrentWeekStart(startOfISOWeek(now))
+    setSelectedDay(now)
   }
 
-  async function handleDragEnd(event: DragEndEvent) {
-    const { active, over } = event
-    setActiveId(null)
-    if (!over) return
-
-    const blockId = String(active.id)
-    const targetDate = String(over.id)
-    const block = blocks.find(b => b.id === blockId)
-    if (!block || block.scheduled_date === targetDate) return
-
-    // Optimistic update
-    setBlocks(prev => prev.map(b => b.id === blockId ? { ...b, scheduled_date: targetDate } : b))
-
-    const res = await fetch(`/api/blocks/${blockId}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ scheduled_date: targetDate }),
-    })
-
-    if (!res.ok) {
-      setBlocks(prev => prev.map(b => b.id === blockId ? { ...b, scheduled_date: block.scheduled_date } : b))
-      toast('Error al mover el bloque', 'error')
-    }
-  }
-
-  // Block operations
-  async function handleAddBlock(data: { activity_id: string; scheduled_date: string; start_time: string; duration_minutes: number; notes: string }) {
+  // Block CRUD
+  async function handleAddBlock(data: {
+    activity_id: string
+    scheduled_date: string
+    start_time: string
+    duration_minutes: number
+    notes: string
+  }) {
     const res = await fetch('/api/blocks', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -496,9 +512,13 @@ export default function WeekPage() {
     })
     if (res.ok) {
       const newBlock: ScheduledBlock = await res.json()
-      setBlocks(prev => [...prev, newBlock].sort((a, b) =>
-        a.scheduled_date.localeCompare(b.scheduled_date) || a.start_time.localeCompare(b.start_time)
-      ))
+      setBlocks(prev =>
+        [...prev, newBlock].sort(
+          (a, b) =>
+            a.scheduled_date.localeCompare(b.scheduled_date) ||
+            a.start_time.localeCompare(b.start_time)
+        )
+      )
       setAddModal(null)
       toast('Bloque añadido', 'success')
     } else {
@@ -506,7 +526,13 @@ export default function WeekPage() {
     }
   }
 
-  async function handleEditBlock(data: { activity_id: string; scheduled_date: string; start_time: string; duration_minutes: number; notes: string }) {
+  async function handleEditBlock(data: {
+    activity_id: string
+    scheduled_date: string
+    start_time: string
+    duration_minutes: number
+    notes: string
+  }) {
     if (!editBlock) return
     const res = await fetch(`/api/blocks/${editBlock.id}`, {
       method: 'PATCH',
@@ -515,7 +541,7 @@ export default function WeekPage() {
     })
     if (res.ok) {
       const updated: ScheduledBlock = await res.json()
-      setBlocks(prev => prev.map(b => b.id === updated.id ? updated : b))
+      setBlocks(prev => prev.map(b => (b.id === updated.id ? updated : b)))
       setEditBlock(null)
       toast('Bloque actualizado', 'success')
     } else {
@@ -544,7 +570,7 @@ export default function WeekPage() {
     })
     if (res.ok) {
       const updated: ScheduledBlock = await res.json()
-      setBlocks(prev => prev.map(b => b.id === updated.id ? updated : b))
+      setBlocks(prev => prev.map(b => (b.id === updated.id ? updated : b)))
       setEditBlock(null)
     }
   }
@@ -554,7 +580,11 @@ export default function WeekPage() {
     setReorganizing(true)
     try {
       const res = await fetch('/api/scheduling/reorganize', { method: 'POST' })
-      if (!res.ok) throw new Error()
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}))
+        toast(body.error ?? 'Error al reorganizar con IA', 'error')
+        return
+      }
       const { blocks: aiBlocks } = await res.json()
       setDiffData(aiBlocks ?? [])
     } catch {
@@ -566,8 +596,8 @@ export default function WeekPage() {
 
   async function handleApplyDiff() {
     if (!diffData) return
-    // Delete future blocks in this week
-    const futureBlocks = blocks.filter(b => b.scheduled_date >= today)
+    // Delete future non-completed blocks
+    const futureBlocks = blocks.filter(b => b.scheduled_date >= todayStr && !b.is_completed)
     for (const b of futureBlocks) {
       await fetch(`/api/blocks/${b.id}`, { method: 'DELETE' })
     }
@@ -583,7 +613,7 @@ export default function WeekPage() {
           scheduled_date: aiBlock.date,
           start_time: aiBlock.start_time,
           duration_minutes: aiBlock.duration_minutes,
-          notes: aiBlock.notes,
+          notes: aiBlock.notes ?? null,
           is_tentative: true,
         }),
       })
@@ -593,320 +623,340 @@ export default function WeekPage() {
     toast('Semana reorganizada', 'success')
   }
 
-  // Timeline click
-  function handleTimelineClick(e: React.MouseEvent<HTMLDivElement>) {
+  // Click on timeline to add a block
+  function handleColumnClick(e: React.MouseEvent<HTMLDivElement>, dateStr: string) {
     const rect = e.currentTarget.getBoundingClientRect()
     const y = e.clientY - rect.top
-    const totalMinutes = Math.max(0, Math.floor(y))
-    const hour = Math.floor(totalMinutes / 60)
-    const minute = Math.floor((totalMinutes % 60) / 15) * 15
-    const timeStr = `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`
-    setAddModal({ date: format(selectedDay, 'yyyy-MM-dd'), time: timeStr })
+    const minutesFromStart = Math.floor((y / HOUR_HEIGHT) * 60)
+    const totalMins = HOUR_START * 60 + minutesFromStart
+    const snappedMins = Math.floor(totalMins / 15) * 15
+    const hour = Math.floor(snappedMins / 60)
+    const minute = snappedMins % 60
+    setAddModal({
+      date: dateStr,
+      time: `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`,
+    })
   }
 
-  // Week summary data
+  // Mobile swipe to change day
+  function handleTouchStart(e: React.TouchEvent) {
+    touchStartX.current = e.touches[0].clientX
+  }
+  function handleTouchEnd(e: React.TouchEvent) {
+    if (touchStartX.current === null) return
+    const dx = e.changedTouches[0].clientX - touchStartX.current
+    if (Math.abs(dx) > 50) {
+      setSelectedDay(d => addDays(d, dx < 0 ? 1 : -1))
+    }
+    touchStartX.current = null
+  }
+
+  // Stats
+  const totalWeekMins = blocks.reduce((acc, b) => acc + b.duration_minutes, 0)
   const blocksByActivity: Record<string, number> = {}
   for (const b of blocks) {
     blocksByActivity[b.activity_id] = (blocksByActivity[b.activity_id] ?? 0) + b.duration_minutes * 60
   }
-  const totalWeekMins = blocks.reduce((acc, b) => acc + b.duration_minutes, 0)
 
-  const activeBlock = blocks.find(b => b.id === activeId)
+  // Current time position
+  const ctHH = String(currentTime.getHours()).padStart(2, '0')
+  const ctMM = String(currentTime.getMinutes()).padStart(2, '0')
+  const currentTimeTop = timeToTopPx(`${ctHH}:${ctMM}`)
 
-  const isCurrentWeek = weekStartStr === format(startOfISOWeek(new Date()), 'yyyy-MM-dd')
-
-  const navDateLabel = view === 'week'
-    ? `Semana del ${format(weekStart, 'd')}–${format(weekEnd, 'd MMM', { locale: es })}`
-    : (() => {
-        const raw = format(selectedDay, "EEEE, d 'de' MMMM", { locale: es })
-        return raw.charAt(0).toUpperCase() + raw.slice(1)
-      })()
+  // Week header label
+  const weekLabel = `${format(weekStart, 'd')}–${format(weekEnd, 'd MMM', { locale: es })}`
 
   return (
-    <div className="p-4 md:p-6 space-y-4 pb-24 animate-fade-in">
+    <div className="h-full flex flex-col overflow-hidden" style={{ minHeight: 0 }}>
 
-      {/* ─── View toggle ─── */}
-      <div className="flex items-center gap-1 bg-[#111111] border border-[#1f1f1f] rounded-xl p-1 w-fit">
-        {(['week', 'day'] as const).map(v => (
-          <button
-            key={v}
-            onClick={() => setView(v)}
-            className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-              view === v
-                ? 'bg-[#6366f1] text-white'
-                : 'text-[#94a3b8] hover:bg-[#1a1a1a]'
-            }`}
-          >
-            {v === 'week' ? 'Semana' : 'Día'}
-          </button>
-        ))}
-      </div>
+      {/* ─── Top navigation bar ─── */}
+      <div className="flex-shrink-0 px-4 lg:px-6 py-3 flex items-center gap-3 border-b border-[var(--border)] bg-[var(--surface-1)]">
+        <button
+          onClick={prevWeek}
+          className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-[var(--surface-2)] transition-colors"
+        >
+          <ChevronLeft size={16} className="text-[var(--text-secondary)]" />
+        </button>
 
-      {/* ─── Navigation ─── */}
-      <div className="flex items-center gap-3">
+        <span className="flex-1 text-[14px] font-[600] text-[var(--text-primary)] text-center">
+          {weekLabel}
+        </span>
+
         <button
-          onClick={() => {
-            if (view === 'week') setCurrentWeekStart(d => subWeeks(d, 1))
-            else setSelectedDay(d => addDays(d, -1))
-          }}
-          className="w-10 h-10 flex items-center justify-center rounded-xl hover:bg-[#1a1a1a] transition-colors"
+          onClick={nextWeek}
+          className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-[var(--surface-2)] transition-colors"
         >
-          <ChevronLeft size={18} className="text-[#94a3b8]" />
+          <ChevronRight size={16} className="text-[var(--text-secondary)]" />
         </button>
-        <span className="flex-1 text-sm font-semibold text-[#f1f5f9] text-center">{navDateLabel}</span>
+
         <button
-          onClick={() => {
-            if (view === 'week') setCurrentWeekStart(d => addWeeks(d, 1))
-            else setSelectedDay(d => addDays(d, 1))
-          }}
-          className="w-10 h-10 flex items-center justify-center rounded-xl hover:bg-[#1a1a1a] transition-colors"
-        >
-          <ChevronRight size={18} className="text-[#94a3b8]" />
-        </button>
-        <button
-          onClick={() => {
-            const now = new Date()
-            setCurrentWeekStart(startOfISOWeek(now))
-            setSelectedDay(now)
-          }}
-          className="px-3 py-1.5 text-xs font-medium text-[#6366f1] border border-[#6366f1]/30 rounded-lg hover:bg-[#6366f1]/10 transition-colors"
+          onClick={goToday}
+          className="px-3 py-1.5 text-[12px] font-[500] text-[var(--accent)] border border-[rgba(99,102,241,0.3)] rounded-lg hover:bg-[rgba(99,102,241,0.08)] transition-colors"
         >
           Hoy
         </button>
       </div>
 
-      {/* ─── Main content + sidebar ─── */}
-      <div className="flex gap-6">
-        <div className="flex-1 min-w-0">
+      {/* ─── DESKTOP: 7-column timeline (≥1024px) ─── */}
+      <div className="hidden lg:flex flex-col flex-1 overflow-hidden" style={{ minHeight: 0 }}>
 
-          {/* ─── WEEK VIEW ─── */}
-          {view === 'week' && (
-            <DndContext onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
-              <div className="overflow-x-auto -mx-4 px-4 md:mx-0 md:px-0">
-                <div className="flex gap-2 min-w-max md:min-w-0 md:grid md:grid-cols-7">
-                  {days.map((day, i) => {
-                    const dateStr = format(day, 'yyyy-MM-dd')
-                    const isToday = dateStr === today
-                    const dayBlocks = blocks.filter(b => b.scheduled_date === dateStr).sort((a, b) => a.start_time.localeCompare(b.start_time))
-
-                    return (
-                      <div key={dateStr} className="min-w-[130px] flex flex-col">
-                        {/* Column header */}
-                        <div className={`pb-2 ${isToday ? 'border-b-2 border-[#6366f1]' : 'border-b border-[#1f1f1f]'}`}>
-                          <p className={`text-xs font-medium ${isToday ? 'text-[#6366f1]' : 'text-[#94a3b8]'}`}>
-                            {DAY_ABBREVS[i]}
-                          </p>
-                          <p className={`text-lg font-bold ${isToday ? 'text-[#6366f1]' : 'text-[#f1f5f9]'}`}>
-                            {format(day, 'd')}
-                          </p>
-                        </div>
-
-                        {/* Droppable area */}
-                        <DroppableDay dateStr={dateStr}>
-                          {dayBlocks.map(block => (
-                            <DraggableBlock
-                              key={block.id}
-                              block={block}
-                              onEdit={setEditBlock}
-                            />
-                          ))}
-                          <button
-                            onClick={() => setAddModal({ date: dateStr })}
-                            className="mt-auto pt-2 w-full text-xs text-[#475569] hover:text-[#94a3b8] transition-colors py-2 text-center"
-                          >
-                            <Plus size={14} className="inline mr-1" />
-                          </button>
-                        </DroppableDay>
-                      </div>
-                    )
-                  })}
-                </div>
-              </div>
-
-              <DragOverlay>
-                {activeId && activeBlock && (
-                  <div
-                    className="border-l-[3px] rounded-md p-2 shadow-xl opacity-90 w-[130px]"
-                    style={{
-                      borderLeftColor: activeBlock.activity?.color ?? '#6366f1',
-                      backgroundColor: (activeBlock.activity?.color ?? '#6366f1') + '2a',
-                    }}
-                  >
-                    <p className="text-xs font-semibold text-[#f1f5f9]">{activeBlock.activity?.name}</p>
-                    <p className="text-xs text-[#94a3b8]">{activeBlock.start_time.substring(0, 5)}</p>
-                  </div>
-                )}
-              </DragOverlay>
-            </DndContext>
-          )}
-
-          {/* ─── DAY VIEW ─── */}
-          {view === 'day' && (
-            <div
-              className="relative overflow-y-auto border border-[#1f1f1f] rounded-xl"
-              style={{ height: '70vh' }}
-            >
+        {/* Column headers */}
+        <div className="flex-shrink-0 flex bg-[var(--surface-1)] border-b border-[var(--border)]">
+          {/* Time rail spacer */}
+          <div className="flex-shrink-0 w-12" />
+          {days.map((day, i) => {
+            const dateStr = format(day, 'yyyy-MM-dd')
+            const isToday = dateStr === todayStr
+            return (
               <div
-                ref={timelineRef}
-                className="relative"
-                style={{ height: 1440, minWidth: 0 }}
-                onClick={handleTimelineClick}
+                key={dateStr}
+                className="flex-1 py-3 text-center border-l border-[var(--border)]"
               >
-                {/* Hour labels + lines */}
-                {Array.from({ length: 24 }, (_, h) => (
-                  <div key={h} className="absolute left-0 right-0" style={{ top: h * 60 }}>
-                    <div className="flex items-start">
-                      <span className="text-xs text-[#475569] w-10 text-right pr-2 -mt-2 select-none flex-shrink-0">
-                        {String(h).padStart(2, '0')}
-                      </span>
-                      <div className="flex-1 border-t border-[#1f1f1f]" />
-                    </div>
-                  </div>
+                <p className="text-[11px] font-[500] text-[var(--text-muted)] uppercase tracking-wider">
+                  {DAY_ABBREVS[i]}
+                </p>
+                <p
+                  className="text-[16px] font-[500] mt-0.5"
+                  style={{ color: isToday ? 'var(--accent)' : 'var(--text-primary)' }}
+                >
+                  {format(day, 'd')}
+                </p>
+                {isToday && (
+                  <div className="mx-auto mt-1 w-6 h-[2px] rounded-full bg-[var(--accent)]" />
+                )}
+              </div>
+            )
+          })}
+        </div>
+
+        {/* Scrollable timeline body */}
+        <div className="flex flex-1 overflow-y-auto" style={{ minHeight: 0 }}>
+
+          {/* Time rail */}
+          <div
+            className="flex-shrink-0 w-12 relative select-none"
+            style={{ height: TIMELINE_HEIGHT }}
+          >
+            {HOURS.filter((_, i) => i % 2 === 0 && i < HOURS.length - 1).map(h => (
+              <div
+                key={h}
+                className="absolute right-0 pr-2 flex items-center"
+                style={{ top: (h - HOUR_START) * HOUR_HEIGHT - 8 }}
+              >
+                <span className="text-[11px] text-[var(--text-muted)]">
+                  {String(h % 24).padStart(2, '0')}:00
+                </span>
+              </div>
+            ))}
+          </div>
+
+          {/* Day columns */}
+          {days.map((day, _i) => {
+            const dateStr = format(day, 'yyyy-MM-dd')
+            const isToday = dateStr === todayStr
+            const dayBlocks = blocks.filter(b => b.scheduled_date === dateStr)
+
+            return (
+              <div
+                key={dateStr}
+                className="flex-1 relative border-l border-[var(--border)] cursor-crosshair"
+                style={{ height: TIMELINE_HEIGHT }}
+                onClick={e => handleColumnClick(e, dateStr)}
+              >
+                {/* Hour dividers */}
+                {HOURS.slice(1).map(h => (
+                  <div
+                    key={h}
+                    className={`absolute left-0 right-0 ${
+                      h % 2 === 0 ? 'timeline-hour-line-major' : 'timeline-hour-line'
+                    }`}
+                    style={{ top: (h - HOUR_START) * HOUR_HEIGHT }}
+                  />
+                ))}
+
+                {/* Blocks */}
+                {dayBlocks.map(block => (
+                  <TimelineBlock
+                    key={block.id}
+                    block={block}
+                    onClick={() => setEditBlock(block)}
+                  />
                 ))}
 
                 {/* Current time indicator */}
-                {format(selectedDay, 'yyyy-MM-dd') === today && (
+                {isToday && currentTimeTop >= 0 && currentTimeTop <= TIMELINE_HEIGHT && (
                   <div
                     className="absolute left-0 right-0 z-10 pointer-events-none"
-                    style={{ top: currentMinute }}
+                    style={{ top: currentTimeTop }}
                   >
                     <div className="flex items-center">
-                      <div className="w-2 h-2 rounded-full bg-[#ef4444] ml-10 flex-shrink-0" />
-                      <div className="flex-1 h-[2px] bg-[#ef4444]" />
+                      <div className="w-2 h-2 rounded-full bg-[var(--danger)] -ml-1 flex-shrink-0" />
+                      <div className="flex-1 h-[1px] bg-[var(--danger)]" />
                     </div>
                   </div>
                 )}
-
-                {/* Blocks */}
-                {blocks
-                  .filter(b => b.scheduled_date === format(selectedDay, 'yyyy-MM-dd'))
-                  .map(block => {
-                    const [h, m] = block.start_time.split(':').map(Number)
-                    const top = h * 60 + m
-                    const height = Math.max(block.duration_minutes, 30)
-                    const color = block.activity?.color ?? '#6366f1'
-                    return (
-                      <div
-                        key={block.id}
-                        className="absolute rounded-md p-1.5 cursor-pointer overflow-hidden border-l-[3px] text-xs hover:opacity-80 transition-opacity"
-                        style={{
-                          top,
-                          height,
-                          left: 44,
-                          right: 4,
-                          borderLeftColor: color,
-                          backgroundColor: color + '2a',
-                        }}
-                        onClick={e => { e.stopPropagation(); setEditBlock(block) }}
-                      >
-                        <p className="font-semibold text-[#f1f5f9] leading-tight truncate">
-                          {block.activity?.name}
-                        </p>
-                        <p className="text-[#94a3b8] mt-0.5">
-                          {block.start_time.substring(0, 5)} · {fmtMins(block.duration_minutes)}
-                        </p>
-                      </div>
-                    )
-                  })}
               </div>
-            </div>
-          )}
+            )
+          })}
+        </div>
+      </div>
+
+      {/* ─── MOBILE: single-day timeline (<1024px) ─── */}
+      <div className="lg:hidden flex flex-col flex-1 overflow-hidden" style={{ minHeight: 0 }}>
+
+        {/* Sticky day tabs */}
+        <div className="flex-shrink-0 flex overflow-x-auto hide-scrollbar bg-[var(--surface-1)] border-b border-[var(--border)]">
+          {days.map((day, i) => {
+            const dateStr = format(day, 'yyyy-MM-dd')
+            const isSelected = format(selectedDay, 'yyyy-MM-dd') === dateStr
+            const isToday = dateStr === todayStr
+            return (
+              <button
+                key={dateStr}
+                onClick={() => setSelectedDay(day)}
+                className={`flex-shrink-0 px-4 py-2.5 text-center transition-colors ${
+                  isSelected
+                    ? 'border-b-2 border-[var(--accent)]'
+                    : 'border-b-2 border-transparent'
+                }`}
+              >
+                <p
+                  className={`text-[10px] font-[500] uppercase tracking-wider ${
+                    isSelected ? 'text-[var(--accent)]' : 'text-[var(--text-muted)]'
+                  }`}
+                >
+                  {DAY_ABBREVS[i]}
+                </p>
+                <p
+                  className="text-[14px] font-[500] mt-0.5"
+                  style={{
+                    color: isToday
+                      ? 'var(--accent)'
+                      : isSelected
+                      ? 'var(--text-primary)'
+                      : 'var(--text-secondary)',
+                  }}
+                >
+                  {format(day, 'd')}
+                </p>
+              </button>
+            )
+          })}
         </div>
 
-        {/* ─── Desktop week summary ─── */}
-        <div className="hidden md:flex flex-col gap-4 w-[260px] flex-shrink-0">
-          <div className="bg-[#111111] border border-[#1f1f1f] rounded-xl p-4 space-y-4">
-            <h3 className="text-sm font-semibold text-[#f1f5f9]">Resumen de la semana</h3>
-            <p className="text-xs text-[#94a3b8]">Total planificado: <span className="text-[#f1f5f9] font-semibold">{fmtMins(totalWeekMins)}</span></p>
-            <div className="space-y-3">
-              {activities
-                .filter(a => blocksByActivity[a.id] > 0 || (a.weekly_goal_hours && a.weekly_goal_hours > 0))
-                .map(a => {
-                  const secs = blocksByActivity[a.id] ?? 0
-                  const goalSecs = (a.weekly_goal_hours ?? 0) * 3600
-                  const pct = goalSecs > 0 ? Math.min((secs / goalSecs) * 100, 100) : (secs > 0 ? 100 : 0)
-                  return (
-                    <div key={a.id} className="space-y-1">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-1.5">
-                          <div className="w-2 h-2 rounded-full" style={{ backgroundColor: a.color }} />
-                          <span className="text-xs text-[#f1f5f9] truncate max-w-[120px]">{a.name}</span>
-                        </div>
-                        <span className="text-xs text-[#94a3b8]">
-                          {fmtMins(Math.round(secs / 60))}
-                          {a.weekly_goal_hours ? ` / ${a.weekly_goal_hours}h` : ''}
-                        </span>
-                      </div>
-                      {goalSecs > 0 && <ProgressBar value={pct} max={100} color={a.color} height={4} />}
-                    </div>
-                  )
-                })}
+        {/* Single-day timeline */}
+        <div
+          className="flex-1 overflow-y-auto"
+          style={{ minHeight: 0 }}
+          onTouchStart={handleTouchStart}
+          onTouchEnd={handleTouchEnd}
+        >
+          <div className="flex" style={{ height: TIMELINE_HEIGHT }}>
+            {/* Time rail */}
+            <div
+              className="flex-shrink-0 w-12 relative select-none"
+              style={{ height: TIMELINE_HEIGHT }}
+            >
+              {HOURS.filter((_, i) => i % 2 === 0 && i < HOURS.length - 1).map(h => (
+                <div
+                  key={h}
+                  className="absolute right-0 pr-2 flex items-center"
+                  style={{ top: (h - HOUR_START) * HOUR_HEIGHT - 8 }}
+                >
+                  <span className="text-[11px] text-[var(--text-muted)]">
+                    {String(h % 24).padStart(2, '0')}:00
+                  </span>
+                </div>
+              ))}
             </div>
 
-            <button
-              onClick={handleReorganize}
-              disabled={reorganizing || !isCurrentWeek}
-              className="w-full flex items-center justify-center gap-2 py-3 bg-[#6366f1] rounded-xl text-sm font-semibold text-white hover:bg-[#5254cc] disabled:opacity-50 transition-colors"
-            >
-              <Sparkles size={16} />
-              {reorganizing ? 'Analizando…' : 'Reorganizar con IA'}
-            </button>
+            {/* Day column */}
+            {(() => {
+              const dateStr = format(selectedDay, 'yyyy-MM-dd')
+              const isToday = dateStr === todayStr
+              const dayBlocks = blocks.filter(b => b.scheduled_date === dateStr)
+              return (
+                <div
+                  className="flex-1 relative border-l border-[var(--border)] cursor-crosshair"
+                  style={{ height: TIMELINE_HEIGHT }}
+                  onClick={e => handleColumnClick(e, dateStr)}
+                >
+                  {HOURS.slice(1).map(h => (
+                    <div
+                      key={h}
+                      className={`absolute left-0 right-0 ${
+                        h % 2 === 0 ? 'timeline-hour-line-major' : 'timeline-hour-line'
+                      }`}
+                      style={{ top: (h - HOUR_START) * HOUR_HEIGHT }}
+                    />
+                  ))}
+                  {dayBlocks.map(block => (
+                    <TimelineBlock
+                      key={block.id}
+                      block={block}
+                      onClick={() => setEditBlock(block)}
+                    />
+                  ))}
+                  {isToday && currentTimeTop >= 0 && (
+                    <div
+                      className="absolute left-0 right-0 z-10 pointer-events-none"
+                      style={{ top: currentTimeTop }}
+                    >
+                      <div className="flex items-center">
+                        <div className="w-2 h-2 rounded-full bg-[var(--danger)] -ml-1 flex-shrink-0" />
+                        <div className="flex-1 h-[1px] bg-[var(--danger)]" />
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )
+            })()}
           </div>
         </div>
       </div>
 
-      {/* ─── Mobile summary bar ─── */}
-      <div className="md:hidden fixed bottom-16 left-0 right-0 bg-[#111111] border-t border-[#1f1f1f] px-4 py-2 flex items-center justify-between z-30">
-        <span className="text-sm text-[#94a3b8]">
-          Total: <span className="text-[#f1f5f9] font-semibold">{fmtMins(totalWeekMins)}</span>
+      {/* ─── Sticky footer ─── */}
+      <div className="flex-shrink-0 px-4 lg:px-6 py-3 border-t border-[var(--border)] bg-[var(--surface-1)] flex items-center justify-between">
+        <span className="text-[13px] text-[var(--text-secondary)]">
+          Total:{' '}
+          <span className="text-[var(--text-primary)] font-[600]">
+            {fmtMins(totalWeekMins)} planificados
+          </span>
         </span>
         <button
-          onClick={() => setWeekSummaryOpen(true)}
-          className="text-xs text-[#6366f1] font-medium"
+          onClick={handleReorganize}
+          disabled={reorganizing || !isCurrentWeek}
+          className="flex items-center gap-2 px-4 py-2 bg-[var(--accent)] hover:bg-[var(--accent-hover)] rounded-lg text-[13px] font-[600] text-white disabled:opacity-50 transition-colors"
         >
-          Ver resumen
+          <Sparkles size={14} />
+          {reorganizing
+            ? 'Analizando…'
+            : blocks.length === 0
+            ? 'Generar semana con IA'
+            : 'Reorganizar con IA'}
         </button>
       </div>
 
-      {/* ─── Mobile summary sheet ─── */}
-      {weekSummaryOpen && (
-        <div className="fixed inset-0 z-50 flex items-end md:hidden">
-          <div className="absolute inset-0 bg-black/60" onClick={() => setWeekSummaryOpen(false)} />
-          <div className="relative w-full bg-[#111111] border-t border-[#1f1f1f] rounded-t-2xl p-6 pb-10 space-y-4">
-            <div className="flex items-center justify-between">
-              <h3 className="text-sm font-semibold text-[#f1f5f9]">Resumen de la semana</h3>
-              <button onClick={() => setWeekSummaryOpen(false)}><X size={18} className="text-[#94a3b8]" /></button>
-            </div>
-            {activities.filter(a => blocksByActivity[a.id] > 0).map(a => {
-              const secs = blocksByActivity[a.id] ?? 0
-              const goalSecs = (a.weekly_goal_hours ?? 0) * 3600
-              const pct = goalSecs > 0 ? Math.min((secs / goalSecs) * 100, 100) : 100
-              return (
-                <div key={a.id} className="space-y-1">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <div className="w-2 h-2 rounded-full" style={{ backgroundColor: a.color }} />
-                      <span className="text-sm text-[#f1f5f9]">{a.name}</span>
-                    </div>
-                    <span className="text-xs text-[#94a3b8]">{fmtMins(Math.round(secs / 60))}{a.weekly_goal_hours ? ` / ${a.weekly_goal_hours}h` : ''}</span>
-                  </div>
-                  {goalSecs > 0 && <ProgressBar value={pct} max={100} color={a.color} height={4} />}
-                </div>
-              )
-            })}
-            <button
-              onClick={() => { setWeekSummaryOpen(false); handleReorganize() }}
-              disabled={reorganizing}
-              className="w-full flex items-center justify-center gap-2 py-3 bg-[#6366f1] rounded-xl text-sm font-semibold text-white"
-            >
-              <Sparkles size={16} />
-              {reorganizing ? 'Analizando…' : 'Reorganizar con IA'}
-            </button>
+      {/* ─── Loading overlay ─── */}
+      {loading && (
+        <div className="absolute inset-0 z-20 flex items-center justify-center bg-[var(--bg)]/50">
+          <div className="w-5 h-5 border-2 border-[var(--accent)] border-t-transparent rounded-full animate-spin" />
+        </div>
+      )}
+
+      {/* ─── AI loading overlay ─── */}
+      {reorganizing && (
+        <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center">
+          <div className="bg-[var(--surface-1)] border border-[var(--border)] rounded-2xl px-8 py-6 text-center space-y-3">
+            <Sparkles size={28} className="text-[var(--accent)] mx-auto animate-pulse" />
+            <p className="text-[14px] font-[600] text-[var(--text-primary)]">
+              Claude está analizando tu semana…
+            </p>
           </div>
         </div>
       )}
 
-      {/* ─── Add Block Modal ─── */}
+      {/* ─── Add block modal ─── */}
       {addModal && (
         <BlockModal
           mode="add"
@@ -917,7 +967,7 @@ export default function WeekPage() {
         />
       )}
 
-      {/* ─── Edit Block Modal ─── */}
+      {/* ─── Edit block modal ─── */}
       {editBlock && (
         <BlockModal
           mode="edit"
@@ -930,23 +980,13 @@ export default function WeekPage() {
         />
       )}
 
-      {/* ─── AI Reorganize loading overlay ─── */}
-      {reorganizing && (
-        <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center">
-          <div className="bg-[#111111] border border-[#1f1f1f] rounded-2xl px-8 py-6 text-center space-y-3">
-            <Sparkles size={32} className="text-[#6366f1] mx-auto animate-pulse" />
-            <p className="text-sm font-semibold text-[#f1f5f9]">Claude está analizando tu semana…</p>
-          </div>
-        </div>
-      )}
-
-      {/* ─── Diff Modal ─── */}
+      {/* ─── AI diff modal ─── */}
       {diffData && (
         <DiffModal
           currentBlocks={blocks}
           newBlocks={diffData}
           activities={activities}
-          todayStr={today}
+          todayStr={todayStr}
           onApply={handleApplyDiff}
           onCancel={() => setDiffData(null)}
         />

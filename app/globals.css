@@ -1,22 +1,29 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
-
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import 'tailwindcss';
 
 :root {
-  --bg: #0a0a0a;
-  --surface: #111111;
-  --surface-2: #1a1a1a;
-  --border: #1f1f1f;
-  --accent: #6366f1;
-  --accent-hover: #4f46e5;
-  --success: #22c55e;
-  --warning: #f59e0b;
-  --danger: #ef4444;
-  --text-primary: #f1f5f9;
-  --text-secondary: #94a3b8;
-  --text-muted: #475569;
+  --bg: #0A0A0B;
+  --surface-1: #111113;
+  --surface-2: #18181B;
+  --surface-3: #1F1F23;
+  --border: rgba(255,255,255,0.08);
+  --border-strong: rgba(255,255,255,0.12);
+  --text-primary: #FAFAFA;
+  --text-secondary: #A1A1AA;
+  --text-muted: #52525B;
+  --accent: #6366F1;
+  --accent-hover: #818CF8;
+  --success: #10B981;
+  --warning: #F59E0B;
+  --danger: #EF4444;
+  --activity-english: #818CF8;
+  --activity-investments: #34D399;
+  --activity-gym: #FBBF24;
+  --activity-cardio: #FB923C;
+  --activity-school: #F472B6;
+
+  /* Backward-compat aliases for shadcn + existing code */
+  --surface: var(--surface-1);
+  --surface-alt: var(--surface-2);
 }
 
 * {
@@ -26,21 +33,25 @@
 }
 
 html, body {
-  background-color: #0a0a0a;
-  color: #f1f5f9;
-  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  background-color: var(--bg);
+  color: var(--text-primary);
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 /* Scrollbar */
 ::-webkit-scrollbar { width: 4px; height: 4px; }
-::-webkit-scrollbar-track { background: #0a0a0a; }
-::-webkit-scrollbar-thumb { background: #1f1f1f; border-radius: 2px; }
-::-webkit-scrollbar-thumb:hover { background: #2a2a2a; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 2px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.15); }
+
+/* Hide scrollbar (utility) */
+.hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+.hide-scrollbar::-webkit-scrollbar { display: none; }
 
 /* Progress bar gradient */
 .progress-gradient {
-  background: linear-gradient(90deg, #6366f1, #8b5cf6);
+  background: linear-gradient(90deg, #6366F1, #818CF8);
 }
 
 /* Pulse animation for active timer */
@@ -52,7 +63,7 @@ html, body {
 
 /* Drag and drop */
 .dragging { opacity: 0.5; cursor: grabbing; }
-.drop-target { background-color: rgba(99, 102, 241, 0.05); }
+.drop-target { background-color: rgba(99,102,241,0.05); }
 
 /* Monospace timer */
 .timer-display {
@@ -61,12 +72,27 @@ html, body {
   letter-spacing: 0.05em;
 }
 
-/* Bottom sheet animation */
+/* Slide-up animation */
 @keyframes slide-up {
-  from { transform: translateY(100%); }
-  to { transform: translateY(0); }
+  from { transform: translateY(100%); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
 }
 .slide-up { animation: slide-up 0.25s ease-out; }
 
+/* Fade-in animation */
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.fade-in { animation: fade-in 0.2s ease-out; }
+
 /* Toast */
 .toast-enter { animation: slide-up 0.2s ease-out; }
+
+/* Timeline grid lines */
+.timeline-hour-line {
+  border-top: 1px solid rgba(255,255,255,0.04);
+}
+.timeline-hour-line-major {
+  border-top: 1px solid rgba(255,255,255,0.07);
+}

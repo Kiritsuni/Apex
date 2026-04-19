@@ -35,42 +35,54 @@ export async function POST() {
     totals[s.activity_id] = (totals[s.activity_id] ?? 0) + (s.duration_seconds ?? 0);
   }
 
-  const activitiesText = activities.map((a) => {
-    const h = ((totals[a.id] ?? 0) / 3600).toFixed(1);
-    const parts: string[] = [`- ${a.name} (${a.category}): ${h}h in last 30 days`];
-    if (a.weekly_goal_hours) parts.push(`weekly goal: ${a.weekly_goal_hours}h`);
-    if (a.weekly_goal_sessions) parts.push(`weekly goal: ${a.weekly_goal_sessions} sessions`);
-    return parts.join(', ');
-  }).join('\n');
+  const activitiesText = activities
+    .map(a => {
+      const h = ((totals[a.id] ?? 0) / 3600).toFixed(1);
+      const parts: string[] = [`- ${a.name} (${a.category}): ${h}h tracked in last 30 days`];
+      if (a.weekly_goal_hours) parts.push(`weekly target: ${a.weekly_goal_hours}h`);
+      if (a.weekly_goal_sessions) parts.push(`weekly target: ${a.weekly_goal_sessions} sessions`);
+      return parts.join(', ');
+    })
+    .join('\n');
 
   const existingGoalsText = goals.length
-    ? goals.map((g) => `- ${g.title} (${g.completed ? 'completed' : 'active'}): ${g.current_value}/${g.target_value} ${g.unit ?? ''}`).join('\n')
-    : 'None';
+    ? goals.map(g => `- ${g.title} (${g.completed ? 'completed' : 'active'})`).join('\n')
+    : 'None yet';
 
-  const prompt = `You are a performance coach generating goal suggestions for a user. Return JSON only.
+  const prompt = `You are a performance coach generating weekly action suggestions for a user. Return JSON only.
 
 User's activities and recent tracking (last 30 days):
 ${activitiesText}
 
-Existing goals (avoid exact duplicates):
+Existing goals (avoid duplicates):
 ${existingGoalsText}
 
-Generate 4 to 5 goal suggestions that are:
-- Specific and measurable (have a numeric target)
-- Achievable based on their current tracking pace
-- Varied in time horizon (some short-term, some longer-term)
-- Linked to the activities they track
+Generate 3 to 5 SPECIFIC WEEKLY ACTIONS that are:
+- Discrete and checkable (can be marked done by end of week)
+- Outcome-oriented: progress toward a real skill, achievement, or milestone
+- Concrete enough to know when completed
+- Related to the activities they track
+
+IMPORTANT:
+- Do NOT generate hour targets (e.g. "Do 10h of English")
+- Do NOT generate scheduling goals (e.g. "Study 5 days this week")
+- DO generate discrete tasks like:
+  - "Complete 2 Cambridge C1 mock writing tasks"
+  - "Read 1 annual report from watchlist"
+  - "Log a run below 5:00/km pace"
+  - "Finish 3 chapters of grammar workbook"
+  - "Solve 5 practice exam questions under timed conditions"
 
 Return exactly:
 {
   "suggestions": [
     {
-      "title": "string",
-      "description": "string or null",
-      "target_value": number,
+      "title": "string — discrete, checkable action",
+      "description": "string or null — optional context",
+      "target_value": 1,
       "current_value": 0,
-      "unit": "string (e.g. hours, sessions, km, pages)",
-      "activity_name": "string matching an activity name above, or null"
+      "unit": "task",
+      "activity_name": "string matching an activity above, or null"
     }
   ]
 }`;
@@ -80,7 +92,8 @@ Return exactly:
       model: 'claude-haiku-4-5-20251001',
       max_tokens: 800,
       messages: [{ role: 'user', content: prompt }],
-      system: 'You are a goal-setting assistant. Return only valid JSON, no markdown.',
+      system:
+        'You are a performance coach. Generate discrete weekly actions, not hour targets. Return only valid JSON, no markdown.',
     });
 
     const text = message.content[0].type === 'text' ? message.content[0].text : '{}';
@@ -96,7 +109,7 @@ Return exactly:
       unit: string;
       activity_name: string | null;
     }) => {
-      const activity = activities.find((a) => a.name === s.activity_name);
+      const activity = activities.find(a => a.name === s.activity_name);
       const { activity_name, ...rest } = s;
       return { ...rest, activity_id: activity?.id ?? null };
     });
