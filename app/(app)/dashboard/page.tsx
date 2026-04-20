@@ -1,6 +1,6 @@
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
-import { startOfISOWeek, endOfISOWeek, format, getISODay } from 'date-fns'
+import { startOfWeek, endOfWeek, format, getISODay } from 'date-fns'
 import { DashboardClient } from '@/components/dashboard/DashboardClient'
 import type { Activity, ScheduledBlock, Exam, Goal } from '@/types/database'
 
@@ -11,8 +11,8 @@ export default async function DashboardPage() {
 
   const today = new Date()
   const todayStr = format(today, 'yyyy-MM-dd')
-  const weekStart = format(startOfISOWeek(today), 'yyyy-MM-dd')
-  const weekEnd = format(endOfISOWeek(today), 'yyyy-MM-dd')
+  const weekStart = format(startOfWeek(today, { weekStartsOn: 1 }), 'yyyy-MM-dd')
+  const weekEnd = format(endOfWeek(today, { weekStartsOn: 1 }), 'yyyy-MM-dd')
 
   const [
     activitiesResult,
@@ -74,6 +74,11 @@ export default async function DashboardPage() {
     return acc
   }, {} as Record<string, number>)
 
+  const weekCountByActivity = (weekSessionsResult.data ?? []).reduce((acc, s) => {
+    acc[s.activity_id] = (acc[s.activity_id] || 0) + 1
+    return acc
+  }, {} as Record<string, number>)
+
   const isoDay = getISODay(today)
 
   return (
@@ -82,6 +87,7 @@ export default async function DashboardPage() {
       todayBlocks={todayBlocks}
       todayByActivity={todayByActivity}
       weekByActivity={weekByActivity}
+      weekCountByActivity={weekCountByActivity}
       nextExam={nextExam}
       progressiveGoals={progressiveGoals}
       englishStreak={englishStreak}

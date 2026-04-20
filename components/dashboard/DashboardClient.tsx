@@ -56,6 +56,7 @@ interface DashboardClientProps {
   todayBlocks: ScheduledBlock[]
   todayByActivity: Record<string, number>
   weekByActivity: Record<string, number>
+  weekCountByActivity: Record<string, number>
   nextExam: Exam | null
   progressiveGoals: Goal[]
   englishStreak: number
@@ -352,6 +353,7 @@ export function DashboardClient({
   todayBlocks,
   todayByActivity,
   weekByActivity,
+  weekCountByActivity,
   nextExam,
   progressiveGoals,
   englishStreak,
@@ -640,9 +642,9 @@ export function DashboardClient({
                 pct = Math.round((doneSecs / goalSecs) * 100)
                 label = `${fmtSecs(doneSecs)} / ${a.weekly_goal_hours}h`
               } else if (a.weekly_goal_sessions && a.weekly_goal_sessions > 0) {
-                const doneSessionsEst = Math.floor(doneSecs / ((a.session_duration_hours ?? 1) * 3600))
-                pct = Math.round((doneSessionsEst / a.weekly_goal_sessions) * 100)
-                label = `${doneSessionsEst} / ${a.weekly_goal_sessions} ses.`
+                const doneSessions = weekCountByActivity[a.id] ?? 0
+                pct = Math.round((doneSessions / a.weekly_goal_sessions) * 100)
+                label = `${doneSessions} / ${a.weekly_goal_sessions} sesiones`
               }
 
               const color = ringColor(pct)

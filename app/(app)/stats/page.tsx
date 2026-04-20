@@ -3,8 +3,8 @@
 import { useState, useEffect, useCallback } from 'react'
 import {
   format,
-  startOfISOWeek,
-  endOfISOWeek,
+  startOfWeek,
+  endOfWeek,
   subWeeks,
   addDays,
   parseISO,
@@ -119,7 +119,7 @@ export default function StatsPage() {
     if (!stats) return []
     if (range === 'week') {
       // per day this week
-      const weekStart = startOfISOWeek(new Date())
+      const weekStart = startOfWeek(new Date(), { weekStartsOn: 1 })
       const dayNames = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom']
       return Array.from({ length: 7 }, (_, i) => {
         const d = addDays(weekStart, i)
@@ -141,10 +141,10 @@ export default function StatsPage() {
   const weekComparison = (() => {
     if (!stats) return null
     const now = new Date()
-    const thisWeekStart = format(startOfISOWeek(now), 'yyyy-MM-dd')
-    const thisWeekEnd = format(endOfISOWeek(now), 'yyyy-MM-dd')
-    const lastWeekStart = format(startOfISOWeek(subWeeks(now, 1)), 'yyyy-MM-dd')
-    const lastWeekEnd = format(endOfISOWeek(subWeeks(now, 1)), 'yyyy-MM-dd')
+    const thisWeekStart = format(startOfWeek(now, { weekStartsOn: 1 }), 'yyyy-MM-dd')
+    const thisWeekEnd = format(endOfWeek(now, { weekStartsOn: 1 }), 'yyyy-MM-dd')
+    const lastWeekStart = format(startOfWeek(subWeeks(now, 1), { weekStartsOn: 1 }), 'yyyy-MM-dd')
+    const lastWeekEnd = format(endOfWeek(subWeeks(now, 1), { weekStartsOn: 1 }), 'yyyy-MM-dd')
 
     const thisSecs = stats.daily
       .filter((d) => d.date >= thisWeekStart && d.date <= thisWeekEnd)

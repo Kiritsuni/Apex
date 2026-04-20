@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import Anthropic from '@anthropic-ai/sdk';
-import { format, startOfISOWeek, endOfISOWeek, addDays, subWeeks } from 'date-fns';
+import { format, startOfWeek, endOfWeek, addDays, subWeeks } from 'date-fns';
 import { USER_SCHEDULE, MARKET_HOURS } from '@/lib/constants';
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
@@ -18,25 +18,15 @@ export async function POST(request: NextRequest) {
   else if (typeof body.weekOffset === 'number' && body.weekOffset > 0)
     targetDate = subWeeks(new Date(), body.weekOffset);
 
-  const weekStart = startOfISOWeek(targetDate);
-  const weekEnd = endOfISOWeek(targetDate);
+  const weekStart = startOfWeek(targetDate, { weekStartsOn: 1 });
+  const weekEnd = endOfWeek(targetDate, { weekStartsOn: 1 });
   const weekStartStr = format(weekStart, 'yyyy-MM-dd');
   const weekEndStr = format(weekEnd, 'yyyy-MM-dd');
 
   const [activitiesRes, sessionsRes, examsRes] = await Promise.all([
     supabase.from('activities').select('*').eq('user_id', user.id).order('sort_order'),
-    supabase
-      .from('sessions')
-      .select('*, activity:activities(name)')
-      .eq('user_id', user.id)
-      .gte('date', weekStartStr)
-      .lte('date', weekEndStr),
-    supabase
-      .from('exams')
-      .select('*')
-      .eq('user_id', user.id)
-      .gte('exam_date', weekStartStr)
-      .lte('exam_date', weekEndStr),
+    supabase.from('sessions').select('*, activity:activities(name)').eq('user_id', user.id).gte('date', weekStartStr).lte('date', weekEndStr),
+    supabase.from('exams').select('*').eq('user_id', user.id).gte('exam_date', weekStartStr).lte('exam_date', weekEndStr),
   ]);
 
   const activities = activitiesRes.data ?? [];
@@ -52,66 +42,71 @@ export async function POST(request: NextRequest) {
     let availableFrom: string = USER_SCHEDULE.WEEKEND.earliestAvailable;
     if (isMonTue) availableFrom = USER_SCHEDULE.MON_TUE.earliestAvailable;
     else if (isWedFri) availableFrom = USER_SCHEDULE.WED_FRI.earliestAvailable;
-    return {
-      date: format(d, 'yyyy-MM-dd'),
-      dayName: format(d, 'EEEE'),
-      availableFrom,
-      cutoff: USER_SCHEDULE.defaultCutoff,
-      isWeekend,
-      hasMarket: !isWeekend,
-    };
+    return { date: format(d, 'yyyy-MM-dd'), dayName: format(d, 'EEEE'), availableFrom, cutoff: '23:30', isWeekend };
   });
 
   const activitiesText = activities.map((a) => {
-    const parts: string[] = [`- ${a.name} (${a.category})`];
-    if (a.weekly_goal_hours) parts.push(`goal: ${a.weekly_goal_hours}h/wk`);
-    if (a.weekly_goal_sessions) parts.push(`goal: ${a.weekly_goal_sessions}×${a.session_duration_hours ?? 1}h sessions`);
+    const parts: string[] = [`- ${a.name}`];
+    if (a.weekly_goal_hours) parts.push(`goal: ${a.weekly_goal_hours}h/week`);
+    if (a.weekly_goal_sessions) parts.push(`goal: ${a.weekly_goal_sessions} sessions of ${a.session_duration_hours ?? 1}h each`);
     if (a.daily_min_hours) parts.push(`daily min: ${a.daily_min_hours}h`);
-    if (a.is_hard_daily_constraint) parts.push('[DAILY REQUIRED]');
-    if (a.market_aware) parts.push('[MARKET HOURS ONLY]');
+    if (a.is_hard_daily_constraint) parts.push('[DAILY REQUIRED — every day]');
+    if (a.market_aware) parts.push('[INVESTMENTS — weekdays 15:30–22:00 only]');
     return parts.join(', ');
   }).join('\n');
 
-  const prompt = `You are a scheduling assistant. Generate a full weekly plan. Return JSON only — no prose.
+  const systemPrompt = `You are a schedule optimizer for a Spanish student named Adrià, 18 years old, in Girona (Europe/Madrid timezone). Generate a complete weekly schedule as a JSON array of time blocks.
 
-Week: ${weekStartStr} to ${weekEndStr}
+STRICT HARD RULES — violations are rejected:
+1. Block duration: minimum 45 minutes, maximum 2.5 hours continuous. Gym sessions are EXACTLY 3h.
+2. 15-minute break between consecutive blocks of different activities.
+3. NEVER schedule between 14:00–15:00 (lunch) on weekdays, except Gym (3h block).
+4. NEVER schedule after 23:30.
+5. Investments on WEEKDAYS: ONLY 15:30–22:00 CET. On weekends: any available time.
+6. Gym: EXACTLY 3h per session, 4 sessions/week. NEVER same day as Running/MTB.
+7. English C1: EVERY day minimum 1h, prefer 1.5h blocks. This is a hard daily requirement.
+8. Running/MTB: 1 session, prefer Saturday or Sunday morning.
+9. Sunday: lighter day, max 4h total scheduled.
+10. Distribute English across ALL 7 days — never skip a day.
 
-Daily constraints:
-${days.map((d) =>
-  `- ${d.dayName} (${d.date}): available from ${d.availableFrom}, cutoff ${d.cutoff}` +
-  (d.hasMarket ? `, market ${MARKET_HOURS.open}–${MARKET_HOURS.close}` : ', no market')
+OUTPUT FORMAT — valid JSON only, no markdown fences:
+{
+  "blocks": [
+    {
+      "activity_name": "string matching activity names exactly",
+      "date": "YYYY-MM-DD",
+      "start_time": "HH:MM",
+      "end_time": "HH:MM",
+      "duration_minutes": number,
+      "notes": "optional context or null"
+    }
+  ],
+  "reasoning": "2-3 sentences explaining distribution strategy"
+}`;
+
+  const prompt = `Week: ${weekStartStr} to ${weekEndStr}
+
+Daily availability:
+${days.map(d =>
+  `- ${d.dayName} (${d.date}): available from ${d.availableFrom}, cutoff 23:30` +
+  (!d.isWeekend ? `, Investments window ${MARKET_HOURS.open}–${MARKET_HOURS.close}` : ', no market constraint')
 ).join('\n')}
 
 Activities to schedule:
 ${activitiesText}
 
-Exams this week:
-${exams.length ? exams.map((e) => `- ${e.subject} on ${e.exam_date}${e.exam_time ? ` at ${e.exam_time}` : ''}`).join('\n') : 'None'}
+Already tracked this week (do not re-schedule):
+${sessions.length ? sessions.map(s => `- ${s.activity?.name}: ${Math.round((s.duration_seconds ?? 0) / 60)}min on ${s.date}`).join('\n') : 'Nothing yet'}
 
-Already tracked this week:
-${sessions.length ? sessions.map((s) => `- ${s.activity?.name}: ${Math.round((s.duration_seconds ?? 0) / 60)}min on ${s.date}`).join('\n') : 'Nothing yet'}
-
-Rules:
-1. Market-aware activities ONLY during ${MARKET_HOURS.open}–${MARKET_HOURS.close} on weekdays
-2. Never schedule past cutoff ${USER_SCHEDULE.defaultCutoff}
-3. Put [DAILY REQUIRED] activities on every weekday
-4. 15-min buffer between sessions
-5. Leave 2h before any exam free
-6. Subtract already-tracked time from weekly goals
-
-Return exactly:
-{
-  "blocks": [
-    { "date": "YYYY-MM-DD", "activity_name": "string", "start_time": "HH:MM", "end_time": "HH:MM", "duration_minutes": number, "notes": "optional string or null" }
-  ]
-}`;
+Exams this week (leave 2h free before each):
+${exams.length ? exams.map(e => `- ${e.subject} on ${e.exam_date}${e.exam_time ? ` at ${e.exam_time}` : ''}`).join('\n') : 'None'}`;
 
   try {
     const message = await anthropic.messages.create({
-      model: 'claude-haiku-4-5-20251001',
-      max_tokens: 2000,
+      model: 'claude-sonnet-4-6',
+      max_tokens: 4000,
+      system: systemPrompt,
       messages: [{ role: 'user', content: prompt }],
-      system: 'You are a scheduling assistant. Return only valid JSON, no markdown, no explanation.',
     });
     const text = message.content[0].type === 'text' ? message.content[0].text : '{}';
     const match = text.match(/\{[\s\S]*\}/);

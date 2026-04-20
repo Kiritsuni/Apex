@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { format, startOfISOWeek, endOfISOWeek, addDays, subWeeks, addWeeks } from 'date-fns'
+import { format, startOfWeek, endOfWeek, addDays, subWeeks, addWeeks } from 'date-fns'
 import { es } from 'date-fns/locale'
 import { ChevronLeft, ChevronRight, Sparkles, Plus, X, Check, Trash2 } from 'lucide-react'
 import { useActivities } from '@/hooks/useActivities'
@@ -439,7 +439,7 @@ function TimelineBlock({
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export default function WeekPage() {
-  const [currentWeekStart, setCurrentWeekStart] = useState(() => startOfISOWeek(new Date()))
+  const [currentWeekStart, setCurrentWeekStart] = useState(() => startOfWeek(new Date(), { weekStartsOn: 1 }))
   const [selectedDay, setSelectedDay] = useState(() => new Date())
   const [blocks, setBlocks] = useState<ScheduledBlock[]>([])
   const [loading, setLoading] = useState(true)
@@ -453,13 +453,13 @@ export default function WeekPage() {
   const { activities } = useActivities()
   const { toast } = useToast()
 
-  const weekStart = startOfISOWeek(currentWeekStart)
-  const weekEnd = endOfISOWeek(currentWeekStart)
+  const weekStart = startOfWeek(currentWeekStart, { weekStartsOn: 1 })
+  const weekEnd = endOfWeek(currentWeekStart, { weekStartsOn: 1 })
   const weekStartStr = format(weekStart, 'yyyy-MM-dd')
   const weekEndStr = format(weekEnd, 'yyyy-MM-dd')
   const todayStr = format(new Date(), 'yyyy-MM-dd')
   const days = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i))
-  const isCurrentWeek = weekStartStr === format(startOfISOWeek(new Date()), 'yyyy-MM-dd')
+  const isCurrentWeek = weekStartStr === format(startOfWeek(new Date(), { weekStartsOn: 1 }), 'yyyy-MM-dd')
 
   // Current time tick
   useEffect(() => {
@@ -493,7 +493,7 @@ export default function WeekPage() {
   }
   function goToday() {
     const now = new Date()
-    setCurrentWeekStart(startOfISOWeek(now))
+    setCurrentWeekStart(startOfWeek(now, { weekStartsOn: 1 }))
     setSelectedDay(now)
   }
 

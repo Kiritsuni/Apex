@@ -128,8 +128,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         </aside>
 
         {/* ─── Main content ─── */}
-        <main className="flex-1 lg:ml-[240px] flex flex-col h-screen overflow-hidden">
-          <div className="flex-1 overflow-y-auto pb-16 lg:pb-0">
+        <main className="flex-1 lg:ml-60 flex flex-col h-screen overflow-hidden">
+          <div className="flex-1 overflow-y-auto pb-20 lg:pb-0">
             {children}
           </div>
         </main>

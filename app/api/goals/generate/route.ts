@@ -15,21 +15,14 @@ export async function POST() {
 
   const [activitiesRes, goalsRes, sessionsRes] = await Promise.all([
     supabase.from('activities').select('*').eq('user_id', user.id).order('sort_order'),
-    supabase.from('goals').select('*').eq('user_id', user.id),
-    supabase
-      .from('sessions')
-      .select('activity_id, duration_seconds, date')
-      .eq('user_id', user.id)
-      .gte('date', thirtyDaysAgo)
-      .lte('date', today)
-      .not('duration_seconds', 'is', null),
+    supabase.from('goals').select('*').eq('user_id', user.id).eq('completed', false),
+    supabase.from('sessions').select('activity_id, duration_seconds, date').eq('user_id', user.id).gte('date', thirtyDaysAgo).lte('date', today).not('duration_seconds', 'is', null),
   ]);
 
   const activities = activitiesRes.data ?? [];
   const goals = goalsRes.data ?? [];
   const sessions = sessionsRes.data ?? [];
 
-  // Aggregate past-30-day totals per activity
   const totals: Record<string, number> = {};
   for (const s of sessions) {
     totals[s.activity_id] = (totals[s.activity_id] ?? 0) + (s.duration_seconds ?? 0);
@@ -38,69 +31,74 @@ export async function POST() {
   const activitiesText = activities
     .map(a => {
       const h = ((totals[a.id] ?? 0) / 3600).toFixed(1);
-      const parts: string[] = [`- ${a.name} (${a.category}): ${h}h tracked in last 30 days`];
+      const parts: string[] = [`- ${a.name}: ${h}h tracked in last 30 days`];
       if (a.weekly_goal_hours) parts.push(`weekly target: ${a.weekly_goal_hours}h`);
       if (a.weekly_goal_sessions) parts.push(`weekly target: ${a.weekly_goal_sessions} sessions`);
       return parts.join(', ');
     })
     .join('\n');
 
-  const existingGoalsText = goals.length
-    ? goals.map(g => `- ${g.title} (${g.completed ? 'completed' : 'active'})`).join('\n')
+  const goalsText = goals.length
+    ? goals.map(g => `- ${g.title}`).join('\n')
     : 'None yet';
 
-  const prompt = `You are a performance coach generating weekly action suggestions for a user. Return JSON only.
+  const systemPrompt = `You generate weekly action items that move the user's long-term goals forward. Output strictly 5–7 actions, each one: specific, measurable, completable within one week.
 
-User's activities and recent tracking (last 30 days):
-${activitiesText}
+RULES:
+- Never output vague actions like "study more", "review portfolio", "work out more", "look at the market", "do homework"
+- Every action must be something the user can check off as done/not done at the end of the week
+- Actions must be concrete enough that success is unambiguous
 
-Existing goals (avoid duplicates):
-${existingGoalsText}
+GOOD EXAMPLES:
+- "Complete 2 Cambridge C1 Writing mock essays (Part 1 and Part 2) and self-score using the rubric"
+- "Read 1 annual report from the watchlist (MU, GOOGL, or SU) and write a 10-bullet summary"
+- "Bench press 3×5 at 72.5kg this week, log RPE per set"
+- "Complete all Economía problem sets for the current tema, review errors"
+- "Run 8km below 5:15/km pace at least once"
+- "Log 4 gym sessions this week (Tuesday, Thursday, Saturday, Sunday)"
 
-Generate 3 to 5 SPECIFIC WEEKLY ACTIONS that are:
-- Discrete and checkable (can be marked done by end of week)
-- Outcome-oriented: progress toward a real skill, achievement, or milestone
-- Concrete enough to know when completed
-- Related to the activities they track
+BAD EXAMPLES (never output these):
+- "Study English" (vague)
+- "Work out more" (not measurable)
+- "Look at the market" (no deliverable)
+- "Do homework" (not specific)
 
-IMPORTANT:
-- Do NOT generate hour targets (e.g. "Do 10h of English")
-- Do NOT generate scheduling goals (e.g. "Study 5 days this week")
-- DO generate discrete tasks like:
-  - "Complete 2 Cambridge C1 mock writing tasks"
-  - "Read 1 annual report from watchlist"
-  - "Log a run below 5:00/km pace"
-  - "Finish 3 chapters of grammar workbook"
-  - "Solve 5 practice exam questions under timed conditions"
-
-Return exactly:
+OUTPUT FORMAT — valid JSON only, no markdown:
 {
   "suggestions": [
     {
-      "title": "string — discrete, checkable action",
-      "description": "string or null — optional context",
+      "title": "specific, measurable, checkable action",
+      "description": "optional extra context or null",
       "target_value": 1,
       "current_value": 0,
       "unit": "task",
-      "activity_name": "string matching an activity above, or null"
+      "activity_name": "matching activity name or null"
     }
   ]
-}`;
+}
+
+If no long-term goals exist, generate actions tied directly to the user's tracked activity weekly targets instead (e.g. "Log 4 gym sessions this week").`;
+
+  const userPrompt = `USER'S TRACKED ACTIVITIES AND WEEKLY TARGETS:
+${activitiesText}
+
+LONG-TERM GOALS (active):
+${goalsText}
+
+Generate 5–7 specific, measurable, checkable weekly actions. Prioritize actions that move long-term goals forward.`;
 
   try {
     const message = await anthropic.messages.create({
-      model: 'claude-haiku-4-5-20251001',
-      max_tokens: 800,
-      messages: [{ role: 'user', content: prompt }],
-      system:
-        'You are a performance coach. Generate discrete weekly actions, not hour targets. Return only valid JSON, no markdown.',
+      model: 'claude-sonnet-4-6',
+      max_tokens: 1500,
+      system: systemPrompt,
+      messages: [{ role: 'user', content: userPrompt }],
     });
 
     const text = message.content[0].type === 'text' ? message.content[0].text : '{}';
     const match = text.match(/\{[\s\S]*\}/);
     const parsed = match ? JSON.parse(match[0]) : { suggestions: [] };
 
-    // Resolve activity_name → activity_id
     const suggestions = (parsed.suggestions ?? []).map((s: {
       title: string;
       description: string | null;
@@ -113,6 +111,23 @@ Return exactly:
       const { activity_name, ...rest } = s;
       return { ...rest, activity_id: activity?.id ?? null };
     });
+
+    if (suggestions.length === 0) {
+      const fallback = activities
+        .filter(a => a.weekly_goal_sessions || a.weekly_goal_hours)
+        .slice(0, 5)
+        .map(a => ({
+          title: a.weekly_goal_sessions
+            ? `Log ${a.weekly_goal_sessions} ${a.name} sessions this week`
+            : `Log ${a.weekly_goal_hours}h of ${a.name} this week`,
+          description: null,
+          target_value: 1,
+          current_value: 0,
+          unit: 'task',
+          activity_id: a.id,
+        }));
+      return NextResponse.json({ suggestions: fallback });
+    }
 
     return NextResponse.json({ suggestions });
   } catch (err) {

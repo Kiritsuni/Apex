@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
-import { format, subDays, startOfISOWeek } from 'date-fns';
+import { format, subDays, startOfWeek } from 'date-fns';
 
 export async function GET(request: NextRequest) {
   const supabase = await createClient();
@@ -47,7 +47,7 @@ export async function GET(request: NextRequest) {
   // Weekly totals
   const weeklyMap: Record<string, number> = {};
   for (const s of sessions) {
-    const weekStart = format(startOfISOWeek(new Date(s.date + 'T12:00:00')), 'yyyy-MM-dd');
+    const weekStart = format(startOfWeek(new Date(s.date + 'T12:00:00'), { weekStartsOn: 1 }), 'yyyy-MM-dd');
     weeklyMap[weekStart] = (weeklyMap[weekStart] ?? 0) + (s.duration_seconds ?? 0);
   }
 

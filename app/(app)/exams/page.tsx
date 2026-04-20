@@ -221,24 +221,24 @@ export default function ExamsPage() {
         <form onSubmit={handleSubmit} className="space-y-4">
           {/* Title */}
           <div className="space-y-1.5">
-            <label className="text-sm text-[#94a3b8]">Título</label>
+            <label className="text-sm font-medium text-[var(--text-primary)] mb-2 block">Título</label>
             <input
               type="text"
               required
               placeholder="Ej: Examen Economía Tema 3"
               value={form.title}
               onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))}
-              className="w-full bg-[#1a1a1a] border border-[#1f1f1f] rounded-lg px-3 py-2 text-sm text-[#f1f5f9] placeholder-[#475569] focus:outline-none focus:border-[#6366f1] transition-colors"
+              className="bg-[var(--surface-2)] border border-[var(--border)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] px-3 py-2 rounded-md w-full focus:outline-none focus:border-[var(--accent)] transition-colors text-sm"
             />
           </div>
 
           {/* Subject */}
           <div className="space-y-1.5">
-            <label className="text-sm text-[#94a3b8]">Asignatura</label>
+            <label className="text-sm font-medium text-[var(--text-primary)] mb-2 block">Asignatura</label>
             <select
               value={form.subject}
               onChange={(e) => setForm((f) => ({ ...f, subject: e.target.value }))}
-              className="w-full bg-[#1a1a1a] border border-[#1f1f1f] rounded-lg px-3 py-2 text-sm text-[#f1f5f9] focus:outline-none focus:border-[#6366f1] transition-colors"
+              className="bg-[var(--surface-2)] border border-[var(--border)] text-[var(--text-primary)] px-3 py-2 rounded-md w-full focus:outline-none focus:border-[var(--accent)] transition-colors text-sm"
             >
               <option value="">Selecciona asignatura</option>
               {SUBJECTS.map((s) => (
@@ -250,7 +250,7 @@ export default function ExamsPage() {
           </div>
           {form.subject === 'Otro' && (
             <div className="space-y-1.5">
-              <label className="text-sm text-[#94a3b8]">Asignatura personalizada</label>
+              <label className="text-sm font-medium text-[var(--text-primary)] mb-2 block">Asignatura personalizada</label>
               <input
                 type="text"
                 placeholder="Escribe la asignatura"
@@ -258,27 +258,27 @@ export default function ExamsPage() {
                 onChange={(e) =>
                   setForm((f) => ({ ...f, customSubject: e.target.value }))
                 }
-                className="w-full bg-[#1a1a1a] border border-[#1f1f1f] rounded-lg px-3 py-2 text-sm text-[#f1f5f9] placeholder-[#475569] focus:outline-none focus:border-[#6366f1]"
+                className="bg-[var(--surface-2)] border border-[var(--border)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] px-3 py-2 rounded-md w-full focus:outline-none focus:border-[var(--accent)] text-sm"
               />
             </div>
           )}
 
           {/* Date */}
           <div className="space-y-1.5">
-            <label className="text-sm text-[#94a3b8]">Fecha límite</label>
+            <label className="text-sm font-medium text-[var(--text-primary)] mb-2 block">Fecha límite</label>
             <input
               type="date"
               required
               min={today}
               value={form.dueDate}
               onChange={(e) => setForm((f) => ({ ...f, dueDate: e.target.value }))}
-              className="w-full bg-[#1a1a1a] border border-[#1f1f1f] rounded-lg px-3 py-2 text-sm text-[#f1f5f9] focus:outline-none focus:border-[#6366f1] transition-colors"
+              className="bg-[var(--surface-2)] border border-[var(--border)] text-[var(--text-primary)] px-3 py-2 rounded-md w-full focus:outline-none focus:border-[var(--accent)] transition-colors text-sm"
             />
           </div>
 
           {/* Difficulty */}
           <div className="space-y-1.5">
-            <label className="text-sm text-[#94a3b8]">Dificultad</label>
+            <label className="text-sm font-medium text-[var(--text-primary)] mb-2 block">Dificultad</label>
             <DifficultySelector
               value={form.difficulty}
               onChange={(v) => setForm((f) => ({ ...f, difficulty: v }))}
@@ -287,7 +287,7 @@ export default function ExamsPage() {
 
           {/* Prep hours */}
           <div className="space-y-1.5">
-            <label className="text-sm text-[#94a3b8]">
+            <label className="text-sm font-medium text-[var(--text-primary)] mb-2 block">
               Horas de preparación estimadas
             </label>
             <div className="flex items-center gap-3">
@@ -299,11 +299,11 @@ export default function ExamsPage() {
                     prepHours: Math.max(0.5, +(f.prepHours - 0.5).toFixed(1)),
                   }))
                 }
-                className="w-10 h-10 rounded-lg bg-[#1a1a1a] border border-[#1f1f1f] text-[#f1f5f9] hover:bg-[#222] transition-colors flex items-center justify-center text-xl font-light"
+                className="w-10 h-10 rounded-lg bg-[var(--surface-2)] border border-[var(--border)] text-[var(--text-primary)] hover:bg-[var(--surface-3)] transition-colors flex items-center justify-center text-xl font-light"
               >
                 −
               </button>
-              <span className="text-base font-semibold text-[#f1f5f9] min-w-[3rem] text-center">
+              <span className="text-base font-semibold text-[var(--text-primary)] min-w-[3rem] text-center">
                 {form.prepHours}h
               </span>
               <button
@@ -314,7 +314,7 @@ export default function ExamsPage() {
                     prepHours: Math.min(50, +(f.prepHours + 0.5).toFixed(1)),
                   }))
                 }
-                className="w-10 h-10 rounded-lg bg-[#1a1a1a] border border-[#1f1f1f] text-[#f1f5f9] hover:bg-[#222] transition-colors flex items-center justify-center text-xl font-light"
+                className="w-10 h-10 rounded-lg bg-[var(--surface-2)] border border-[var(--border)] text-[var(--text-primary)] hover:bg-[var(--surface-3)] transition-colors flex items-center justify-center text-xl font-light"
               >
                 +
               </button>
@@ -323,13 +323,13 @@ export default function ExamsPage() {
 
           {/* Notes */}
           <div className="space-y-1.5">
-            <label className="text-sm text-[#94a3b8]">Notas</label>
+            <label className="text-sm font-medium text-[var(--text-primary)] mb-2 block">Notas</label>
             <textarea
               rows={3}
               placeholder="Notas adicionales..."
               value={form.notes}
               onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))}
-              className="w-full bg-[#1a1a1a] border border-[#1f1f1f] rounded-lg px-3 py-2 text-sm text-[#f1f5f9] placeholder-[#475569] focus:outline-none focus:border-[#6366f1] transition-colors resize-none"
+              className="bg-[var(--surface-2)] border border-[var(--border)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] px-3 py-2 rounded-md w-full focus:outline-none focus:border-[var(--accent)] transition-colors resize-none text-sm"
             />
           </div>
 
@@ -472,24 +472,24 @@ export default function ExamsPage() {
             </h2>
             <form onSubmit={handleEdit} className="space-y-4">
               <div className="space-y-1.5">
-                <label className="text-sm text-[#94a3b8]">Título</label>
+                <label className="text-sm font-medium text-[var(--text-primary)] mb-2 block">Título</label>
                 <input
                   type="text"
                   value={editForm.title}
                   onChange={(e) =>
                     setEditForm((f) => ({ ...f, title: e.target.value }))
                   }
-                  className="w-full bg-[#1a1a1a] border border-[#1f1f1f] rounded-lg px-3 py-2 text-sm text-[#f1f5f9] focus:outline-none focus:border-[#6366f1]"
+                  className="bg-[var(--surface-2)] border border-[var(--border)] text-[var(--text-primary)] px-3 py-2 rounded-md w-full focus:outline-none focus:border-[var(--accent)] text-sm"
                 />
               </div>
               <div className="space-y-1.5">
-                <label className="text-sm text-[#94a3b8]">Asignatura</label>
+                <label className="text-sm font-medium text-[var(--text-primary)] mb-2 block">Asignatura</label>
                 <select
                   value={editForm.subject}
                   onChange={(e) =>
                     setEditForm((f) => ({ ...f, subject: e.target.value }))
                   }
-                  className="w-full bg-[#1a1a1a] border border-[#1f1f1f] rounded-lg px-3 py-2 text-sm text-[#f1f5f9] focus:outline-none focus:border-[#6366f1]"
+                  className="bg-[var(--surface-2)] border border-[var(--border)] text-[var(--text-primary)] px-3 py-2 rounded-md w-full focus:outline-none focus:border-[var(--accent)] text-sm"
                 >
                   {SUBJECTS.map((s) => (
                     <option key={s} value={s}>
@@ -500,7 +500,7 @@ export default function ExamsPage() {
               </div>
               {editForm.subject === 'Otro' && (
                 <div className="space-y-1.5">
-                  <label className="text-sm text-[#94a3b8]">
+                  <label className="text-sm font-medium text-[var(--text-primary)] mb-2 block">
                     Asignatura personalizada
                   </label>
                   <input
@@ -509,37 +509,37 @@ export default function ExamsPage() {
                     onChange={(e) =>
                       setEditForm((f) => ({ ...f, customSubject: e.target.value }))
                     }
-                    className="w-full bg-[#1a1a1a] border border-[#1f1f1f] rounded-lg px-3 py-2 text-sm text-[#f1f5f9] focus:outline-none focus:border-[#6366f1]"
+                    className="bg-[var(--surface-2)] border border-[var(--border)] text-[var(--text-primary)] px-3 py-2 rounded-md w-full focus:outline-none focus:border-[var(--accent)] text-sm"
                   />
                 </div>
               )}
               <div className="space-y-1.5">
-                <label className="text-sm text-[#94a3b8]">Fecha límite</label>
+                <label className="text-sm font-medium text-[var(--text-primary)] mb-2 block">Fecha límite</label>
                 <input
                   type="date"
                   value={editForm.dueDate}
                   onChange={(e) =>
                     setEditForm((f) => ({ ...f, dueDate: e.target.value }))
                   }
-                  className="w-full bg-[#1a1a1a] border border-[#1f1f1f] rounded-lg px-3 py-2 text-sm text-[#f1f5f9] focus:outline-none focus:border-[#6366f1]"
+                  className="bg-[var(--surface-2)] border border-[var(--border)] text-[var(--text-primary)] px-3 py-2 rounded-md w-full focus:outline-none focus:border-[var(--accent)] text-sm"
                 />
               </div>
               <div className="space-y-1.5">
-                <label className="text-sm text-[#94a3b8]">Dificultad</label>
+                <label className="text-sm font-medium text-[var(--text-primary)] mb-2 block">Dificultad</label>
                 <DifficultySelector
                   value={editForm.difficulty}
                   onChange={(v) => setEditForm((f) => ({ ...f, difficulty: v }))}
                 />
               </div>
               <div className="space-y-1.5">
-                <label className="text-sm text-[#94a3b8]">Notas</label>
+                <label className="text-sm font-medium text-[var(--text-primary)] mb-2 block">Notas</label>
                 <textarea
                   rows={3}
                   value={editForm.notes}
                   onChange={(e) =>
                     setEditForm((f) => ({ ...f, notes: e.target.value }))
                   }
-                  className="w-full bg-[#1a1a1a] border border-[#1f1f1f] rounded-lg px-3 py-2 text-sm text-[#f1f5f9] focus:outline-none focus:border-[#6366f1] resize-none"
+                  className="bg-[var(--surface-2)] border border-[var(--border)] text-[var(--text-primary)] px-3 py-2 rounded-md w-full focus:outline-none focus:border-[var(--accent)] resize-none text-sm"
                 />
               </div>
               <div className="flex gap-3">
